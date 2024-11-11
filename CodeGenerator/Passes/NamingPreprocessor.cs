@@ -8,7 +8,7 @@ public class NamingPreprocessor : IDefinitionPreprocess
 {
     public void Preprocess(CSharpContext context)
     {
-        ProcessDefinitions(context.Enums);
+        ProcessDefinitions(context.Definitions);
     }
     
     private static void ProcessDefinitions(IEnumerable<CSharpDefinition> definitions)
@@ -20,10 +20,19 @@ public class NamingPreprocessor : IDefinitionPreprocess
                 case CSharpEnum csharpEnum:
                     ProcessEnum(csharpEnum);
                     break;
+                case CSharpMethod csharpMethod:
+                    ProcessMethod(csharpMethod);
+                    break;
                 default:
                     continue;
             }
         }
+    }
+
+    private static void ProcessMethod(CSharpMethod csharpMethod)
+    {
+        if (csharpMethod.Name.StartsWith("ImGui_"))
+            csharpMethod.Name = csharpMethod.Name[6..];
     }
 
     private static void ProcessEnum(CSharpEnum csharpEnum)

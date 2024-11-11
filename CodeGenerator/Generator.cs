@@ -174,12 +174,15 @@ namespace SharpImGui_Dev.CodeGenerator
                     if (innerType.Kind == "Pointer" && innerType.InnerType!.Kind == "Function")
                     {
                         innerType = innerType.InnerType;
-                        var csharpDelegate = UnwrapFunctionTypeDescriptionToDelegate(innerType, name);
+                        var csharpDelegate = GenerateDelegateFromDescription(innerType, name);
                         AttachComments(nativeTypedef.Comments, csharpDelegate);
                         _csharpContext.AddDelegate(csharpDelegate);
                         continue;
                     }
                 }
+
+                if (nativeTypedef.Name.Contains("flags", StringComparison.OrdinalIgnoreCase))
+                    continue;
                 
                 var csharpType = GetCSharpType(nativeTypedef.Type.Description);
                 _csharpContext.AddType(nativeTypedef.Name, csharpType);
@@ -200,7 +203,7 @@ namespace SharpImGui_Dev.CodeGenerator
                 var csharpEnum = new CSharpEnum(nativeEnum.Name);
 
                 if (nativeEnum.IsFlagsEnum)
-                    csharpEnum.IsFlags = true;
+                    csharpEnum.Attributes.Add("[Flags]");
                 
                 AttachComments(nativeEnum.Comments, csharpEnum);
                 
@@ -284,7 +287,7 @@ namespace SharpImGui_Dev.CodeGenerator
                             // we have to gen a [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
                             innerType = innerType.InnerType!;
 
-                            var cSharpDelegate = UnwrapFunctionTypeDescriptionToDelegate(innerType, name + "Delegate");
+                            var cSharpDelegate = GenerateDelegateFromDescription(innerType, name + "Delegate");
 
                             _csharpContext.AddDelegate(cSharpDelegate);
                         }
@@ -331,7 +334,6 @@ namespace SharpImGui_Dev.CodeGenerator
                 csharpMethod.Modifiers.Add("public");
                 csharpMethod.Modifiers.Add("static");
                 csharpMethod.Modifiers.Add("extern");
-                csharpMethod.Modifiers.Add("unsafe");
 
                 foreach (var argument in nativeFunction.Arguments)
                 {
@@ -363,7 +365,7 @@ namespace SharpImGui_Dev.CodeGenerator
                             innerType = innerType.InnerType!;
 
                             var delegateName = functionName + argumentName + "Delegate";
-                            var csharpDelegate = UnwrapFunctionTypeDescriptionToDelegate(innerType, delegateName);
+                            var csharpDelegate = GenerateDelegateFromDescription(innerType, delegateName);
                             
                             _csharpContext.AddDelegate(csharpDelegate);
 
@@ -398,7 +400,7 @@ namespace SharpImGui_Dev.CodeGenerator
             }
         }
 
-        private CSharpDelegate UnwrapFunctionTypeDescriptionToDelegate(TypeDescription description, string delegateName)
+        private CSharpDelegate GenerateDelegateFromDescription(TypeDescription description, string delegateName)
         {
             var csharpReturnType = GetCSharpType(description.ReturnType!);
 
@@ -485,8 +487,8 @@ namespace SharpImGui_Dev.CodeGenerator
                 {
                     var innerType = typeDescription.InnerType!;
                     var innerTypeDef = GetCSharpType(innerType);
-                    
-                    return new CSharpPointerType(_csharpContext.GetOrAddType(innerTypeDef.TypeName, true));
+
+                    return _csharpContext.GetPointerType(innerTypeDef.TypeName);
                 }
                 case "Type":
                 {

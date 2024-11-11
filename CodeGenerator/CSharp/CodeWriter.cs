@@ -198,16 +198,22 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         PopBlock();
     }
 
-    private void WriteContainer(CSharpContainer csharpStruct, string keyword)
+    private void WriteContainer(CSharpContainer csharpContainer, string keyword)
     {
         WriteLine();
-        WriteSummaries(csharpStruct);
-        WriteAttributes(csharpStruct.Attributes);
-        
-        WriteLine($"{string.Join(" ", csharpStruct.Modifiers)} {keyword} {csharpStruct.Name}");
+        WriteSummaries(csharpContainer);
+        WriteAttributes(csharpContainer.Attributes);
+
+        if (csharpContainer.Modifiers.Count > 0)
+        {
+            StartLine();
+            Write(string.Join(" ", csharpContainer.Modifiers) + " ");
+        }
+        Write($"{keyword} {csharpContainer.Name}");
+        EndLine();
         PushBlock();
 
-        WriteCSharpDefinitions(csharpStruct.Definitions);
+        WriteCSharpDefinitions(csharpContainer.Definitions);
         
         PopBlock();
     }
@@ -251,6 +257,7 @@ public class CodeWriter : IDisposable, IAsyncDisposable
     
     private void WriteMethod(CSharpMethod csharpMethod)
     {
+        WriteLine();
         WriteSummaries(csharpMethod);
         WriteAttributes(csharpMethod.Attributes);
             

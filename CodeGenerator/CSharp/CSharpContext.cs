@@ -7,28 +7,32 @@ namespace SharpImGui_Dev.CodeGenerator.CSharp;
 public class CSharpContext
 {
     public const string DefaultNamespace = "SharpImGui";
+    public const string UndefinedFileName = "Unfiled.gen.cs";
     public const string EnumFileName = "Enums.gen.cs";
     public const string StructFileName = "Structs.gen.cs";
-    public const string MethodFileName = "Methods.gen.cs";
+    public const string MethodFileName = "ImGuiNative.gen.cs";
     public const string DelegateFileName = "Delegates.gen.cs";
     public const string ConstantFileName = "Constants.gen.cs";
+    
+    public const string ImGuiConstClassName = "ImGuiConst";
+    public const string ImGuiNativeClassName = "ImGuiNative";
     
     private readonly List<IDefinitionPreprocess> _preprocessors = [];
     
     public List<CSharpFile> Files { get; } = 
     [
-        new CSharpFile(EnumFileName, DefaultNamespace),
-        new CSharpFile(StructFileName, DefaultNamespace),
-        new CSharpFile(MethodFileName, DefaultNamespace, ["System.Runtime.InteropServices"]),
-        new CSharpFile(DelegateFileName, DefaultNamespace, ["System.Runtime.InteropServices"]),
+        new CSharpFile(EnumFileName, DefaultNamespace, ["System"]),
+        new CSharpFile(StructFileName, DefaultNamespace, ["System"]),
+        new CSharpFile(MethodFileName, DefaultNamespace, ["System", "System.Runtime.InteropServices"]),
+        new CSharpFile(DelegateFileName, DefaultNamespace, ["System", "System.Runtime.InteropServices"]),
         new CSharpFile(ConstantFileName, DefaultNamespace)
     ];
     public List<CSharpEnum> Enums { get; } = [];
     public List<CSharpStruct> Structs { get; } = [];
     public List<CSharpClass> Classes { get; } = 
     [
-        new CSharpClass("ImGuiConst"),
-        new CSharpClass("ImGuiFunctions"),
+        new CSharpClass(ImGuiConstClassName) {Modifiers = ["public", "static", "partial"]},
+        new CSharpClass(ImGuiNativeClassName) {Modifiers = ["public", "static", "unsafe", "partial"]},
     ];
     public List<CSharpMethod> Methods { get; } = [];
     public List<CSharpDelegate> Delegates { get; } = [];
@@ -63,6 +67,7 @@ public class CSharpContext
     };
     
     private List<CSharpUnresolvedType> _unresolvedTypes = [];
+    public List<CSharpPointerType> _pointerTypes = [];
     
     public IEnumerable<CSharpDefinition> Definitions => Enums.Concat<CSharpDefinition>(Structs).Concat(Methods).Concat(Delegates).Concat(Constants);
 
@@ -93,10 +98,20 @@ public class CSharpContext
         AddType(name, type);
         return type;
     }
+
+    public CSharpPointerType GetPointerType(string name)
+    {
+        if (_pointerTypes.Any(p => p.TypeName == name))
+            return _pointerTypes.First(p => p.TypeName == name);
+        
+        var pointerType = new CSharpPointerType(GetOrAddType(name));
+        _pointerTypes.Add(pointerType);
+        return pointerType;
+    }
     
     public void AddType(string name, CSharpType type)
     {
-        TypeMap[name] = type;
+        TypeMap.TryAdd(name, type);
     }
 
     public void AddDefinitionToFile(CSharpDefinition definition, string filename)
@@ -104,7 +119,7 @@ public class CSharpContext
         var file = Files.Find(f => f.FileName == filename);
         if (file == null)
         {
-            file = new CSharpFile(filename, "SharpImGui");
+            file = new CSharpFile(filename, DefaultNamespace);
             AddFile(file);
         }
         file.Definitions.Add(definition);
@@ -170,14 +185,14 @@ public class CSharpContext
     public void AddMethod(CSharpMethod csharpMethod)
     {
         Methods.Add(csharpMethod);
-        Classes.First(c => c.Name == "ImGuiFunctions").Definitions.Add(csharpMethod);
+        Classes.First(c => c.Name == ImGuiNativeClassName).Definitions.Add(csharpMethod);
     }
 
     public void AddConstant(CSharpConstant constant)
     {
         Constants.Add(constant);
         AddType(constant.Name, new CSharpType(constant.Name));
-        Classes.First(c => c.Name == "ImGuiConst").Definitions.Add(constant);
+        Classes.First(c => c.Name == ImGuiConstClassName).Definitions.Add(constant);
     }
     
     public void WriteAllFiles(string outputDir)
@@ -214,8 +229,8 @@ public class CSharpContext
 
     private void PlaceDefinitionsInFiles()
     {
-        var constClass = Classes.First(c => c.Name == "ImGuiConst");
-        var functionClass = Classes.First(c => c.Name == "ImGuiFunctions");
+        var constClass = Classes.First(c => c.Name == ImGuiConstClassName);
+        var functionClass = Classes.First(c => c.Name == ImGuiNativeClassName);
         
         AddDefinitionToFile(constClass, ConstantFileName);
         AddDefinitionToFile(functionClass, MethodFileName);
@@ -229,7 +244,7 @@ public class CSharpContext
         definitions.AddRange(Structs.Where(s => s.File == null));
         definitions.AddRange(Classes.Where(s => s.File == null));
         
-        var defaultFile = new CSharpFile("Unfiled.gen.cs", "SharpImGui", ["System"], definitions.ToArray());
+        var defaultFile = new CSharpFile(UndefinedFileName, DefaultNamespace, ["System"], definitions.ToArray());
         AddFile(defaultFile);
     }
 }

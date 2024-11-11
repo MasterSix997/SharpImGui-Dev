@@ -28,8 +28,7 @@ namespace SharpImGui_Dev.CodeGenerator.CSharp
 
     public class CSharpPointerType(CSharpType type) : CSharpType(type.TypeName, true)
     {
-        private CSharpType _type = type;
-        public new string TypeName { get => _type.TypeName; set => _type.TypeName = value; }
+        public new string TypeName { get => type.TypeName; set => type.TypeName = value; }
         public new bool IsPointer { get; set; } = true;
     }
 
