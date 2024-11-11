@@ -4,8 +4,9 @@
         <OutputType>Exe</OutputType>
         <TargetFramework>net8.0</TargetFramework>
         <RootNamespace>SharpImGui_Dev</RootNamespace>
-        <LangVersion>8</LangVersion>
+        <LangVersion>default</LangVersion>
         <Nullable>enable</Nullable>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>
 
 </Project>
