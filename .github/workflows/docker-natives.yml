@@ -1,0 +1,64 @@
+name: Docker Natives
+
+on:
+  workflow_dispatch:
+#  push:
+#    branches: [ "master" ]
+#  pull_request:
+#    branches: [ "master" ]
+
+jobs:
+
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Build the Docker image
+      run: docker build . --file dear_bindings.Dockerfile --tag dear_bindings:v1
+    - name: Run Docker image
+      run: |
+        docker run --rm -i -v "${GITHUB_WORKSPACE}/cimgui:/cimgui_build" dear_bindings:v1
+    - name: Verify compilation
+      run: |
+        file ${{ github.workspace }}/dcimgui/dcimgui_x64.dll
+        file ${{ github.workspace }}/dcimgui/dcimgui_x86.dll
+        file ${{ github.workspace }}/dcimgui/dcimgui.so
+        file ${{ github.workspace }}/dcimgui/dcimgui.dylib
+        file ${{ github.workspace }}/dcimgui/libdcimgui_arm.so
+        file ${{ github.workspace }}/dcimgui/libdcimgui_x86.so
+
+    - name: upload-artifacts-win-x64
+      uses: actions/upload-artifact@v4.3.1
+      with: 
+        name: dcimgui_x64.dll
+        path: ${{ github.workspace }}/dcimgui/dcimgui_x64.dll
+    - name: upload-artifacts-win-x86
+      uses: actions/upload-artifact@v4.3.1
+      with: 
+        name: dcimgui_x86.dll
+        path: ${{ github.workspace }}/dcimgui/dcimgui_x86.dll
+
+    - name: upload-artifacts-linux-x64
+      uses: actions/upload-artifact@v4.3.1
+      with: 
+        name: dcimgui.so
+        path: ${{ github.workspace }}/dcimgui/dcimgui.so
+
+    - name: upload-artifacts-osx-arm64
+      uses: actions/upload-artifact@v4.3.1
+      with: 
+        name: dcimgui.dylib
+        path: ${{ github.workspace }}/dcimgui/dcimgui.dylib
+        
+    - name: upload-artifacts-android-arm
+      uses: actions/upload-artifact@v4.3.1
+      with: 
+        name: libdcimgui_arm.so
+        path: ${{ github.workspace }}/dcimgui/libdcimgui_arm.so
+    - name: upload-artifacts-android-x86
+      uses: actions/upload-artifact@v4.3.1
+      with: 
+        name: libdcimgui_x86.so
+        path: ${{ github.workspace }}/dcimgui/libdcimgui_x86.so
