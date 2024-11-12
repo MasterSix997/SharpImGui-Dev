@@ -9,16 +9,20 @@ using SharpImGui_Dev.CodeGenerator.Passes;
 
 namespace SharpImGui_Dev.CodeGenerator
 {
+    public struct GenerationConfig
+    {
+        public string OutputPath { get; set; }
+        public string Namespace { get; set; }
+        //
+        public Dictionary<Type, string> DefinitionsClasses;
+        public Dictionary<Type, CSharpFile> Files;
+    }
+    
     public class Generator
     {
         private static readonly string ProjectPath = Path.Combine("../../../");
         private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
         private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
-        private string[] _metadataFiles =
-        [
-            "dcimgui.json",
-            // "dcimgui_internal.json"
-        ];
         
         private CSharpContext _csharpContext;
         
@@ -37,10 +41,7 @@ namespace SharpImGui_Dev.CodeGenerator
             _csharpContext.AddPreprocessor(new NamingPreprocessor());
             _csharpContext.AddPreprocessor(new TypesPreprocessor());
             
-            foreach (string metadataFile in _metadataFiles)
-            {
-                GenerateBindings(metadataFile);
-            }
+            GenerateBindings("dcimgui.json");
 
             if (Directory.Exists(_outputPath))
                 Directory.Delete(_outputPath, true);
