@@ -113,6 +113,16 @@ public class CSharpContext
     {
         TypeMap.TryAdd(name, type);
     }
+    
+    public bool HasType(CSharpDefinition definition)
+    {
+        return HasType(definition.Name);
+    }
+    
+    public bool HasType(string name)
+    {
+        return TypeMap.ContainsKey(name);
+    }
 
     public void AddDefinitionToFile(CSharpDefinition definition, string filename)
     {
@@ -158,6 +168,9 @@ public class CSharpContext
     
     public void AddEnum(CSharpEnum @enum)
     {
+        if (HasType(@enum))
+            return;
+        
         Enums.Add(@enum);
         AddType(@enum.Name, new CSharpType(@enum.Name));
         AddDefinitionToFile(@enum, EnumFileName);
@@ -165,6 +178,9 @@ public class CSharpContext
     
     public void AddStruct(CSharpStruct @struct)
     {
+        if (HasType(@struct))
+            return;
+
         Structs.Add(@struct);
         AddType(@struct.Name, new CSharpType(@struct.Name));
         AddDefinitionToFile(@struct, StructFileName);
@@ -172,12 +188,18 @@ public class CSharpContext
 
     public void AddClass(CSharpClass @class)
     {
+        if (HasType(@class))
+            return;
+
         Classes.Add(@class);
         AddType(@class.Name, new CSharpType(@class.Name));
     }
     
     public void AddDelegate(CSharpDelegate @delegate)
     {
+        if (HasType(@delegate))
+            return;
+
         Delegates.Add(@delegate);
         AddType(@delegate.Name, new CSharpType(@delegate.Name));
     }
@@ -190,6 +212,9 @@ public class CSharpContext
 
     public void AddConstant(CSharpConstant constant)
     {
+        if (HasType(constant))
+            return;
+
         Constants.Add(constant);
         AddType(constant.Name, new CSharpType(constant.Name));
         Classes.First(c => c.Name == ImGuiConstClassName).Definitions.Add(constant);
@@ -225,6 +250,7 @@ public class CSharpContext
                 Console.WriteLine($"Could not resolve type {unresolvedType.TypeName}");
             }
         }
+        _unresolvedTypes.Clear();
     }
 
     private void PlaceDefinitionsInFiles()
