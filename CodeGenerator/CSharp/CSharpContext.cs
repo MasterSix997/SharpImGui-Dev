@@ -6,71 +6,58 @@ namespace SharpImGui_Dev.CodeGenerator.CSharp;
 
 public class CSharpContext
 {
-    public const string DefaultNamespace = "SharpImGui";
-    public const string UndefinedFileName = "Unfiled.gen.cs";
-    public const string EnumFileName = "Enums.gen.cs";
-    public const string StructFileName = "Structs.gen.cs";
-    public const string MethodFileName = "ImGuiNative.gen.cs";
-    public const string DelegateFileName = "Delegates.gen.cs";
-    public const string ConstantFileName = "Constants.gen.cs";
-    
-    public const string ImGuiConstClassName = "ImGuiConst";
-    public const string ImGuiNativeClassName = "ImGuiNative";
-    
+    public string Namespace { get; set; }
     private readonly List<IDefinitionPreprocess> _preprocessors = [];
+
+    private Dictionary<Type, CSharpClass> _predefinedClasses = new();
+    private Dictionary<Type, CSharpFile> _predefinedFiles = new();
     
-    public List<CSharpFile> Files { get; } = 
-    [
-        new CSharpFile(EnumFileName, DefaultNamespace, ["System"]),
-        new CSharpFile(StructFileName, DefaultNamespace, ["System"]),
-        new CSharpFile(MethodFileName, DefaultNamespace, ["System", "System.Runtime.InteropServices"]),
-        new CSharpFile(DelegateFileName, DefaultNamespace, ["System", "System.Runtime.InteropServices"]),
-        new CSharpFile(ConstantFileName, DefaultNamespace)
-    ];
+    public List<CSharpFile> Files { get; } = [];
     public List<CSharpEnum> Enums { get; } = [];
     public List<CSharpStruct> Structs { get; } = [];
-    public List<CSharpClass> Classes { get; } = 
-    [
-        new CSharpClass(ImGuiConstClassName) {Modifiers = ["public", "static", "partial"]},
-        new CSharpClass(ImGuiNativeClassName) {Modifiers = ["public", "static", "unsafe", "partial"]},
-    ];
+    public List<CSharpClass> Classes { get; } = [];
     public List<CSharpMethod> Methods { get; } = [];
     public List<CSharpDelegate> Delegates { get; } = [];
     public List<CSharpConstant> Constants { get; } = [];
-    private List<CSharpType> Types { get; } = [];
 
-    public Dictionary<string, CSharpType> TypeMap { get; } = new()
-    {
-        ["int"] = new CSharpType("int"),
-        ["unsigned int"] = new CSharpType("uint"),
-        ["unsigned char"] = new CSharpType("byte"),
-        ["unsigned_char"] = new CSharpType("byte"),
-        ["unsigned_int"] = new CSharpType("uint"),
-        ["unsigned_short"] = new CSharpType("ushort"),
-        ["long long"] = new CSharpType("long"),
-        ["long_long"] = new CSharpType("long"),
-        ["unsigned_long_long"] = new CSharpType("ulong"),
-        ["short"] = new CSharpType("short"),
-        ["signed char"] = new CSharpType("sbyte"),
-        ["signed short"] = new CSharpType("short"),
-        ["signed int"] = new CSharpType("int"),
-        ["signed long long"] = new CSharpType("long"),
-        ["unsigned long long"] = new CSharpType("ulong"),
-        ["unsigned short"] = new CSharpType("ushort"),
-        ["float"] = new CSharpType("float"),
-        ["bool"] = new CSharpType("bool"),
-        ["char"] = new CSharpType("char"),
-        ["double"] = new CSharpType("double"),
-        ["void"] = new CSharpType("void"),
-        ["va_list"] = new CSharpType("va_list"),
-        ["size_t"] = new CSharpType("ulong"), // assume only x64 for now
-    };
+    public Dictionary<string, CSharpType> TypeMap { get; init; } = new();
     
-    private List<CSharpUnresolvedType> _unresolvedTypes = [];
-    public List<CSharpPointerType> _pointerTypes = [];
+    private readonly List<CSharpUnresolvedType> _unresolvedTypes = [];
+    private readonly List<CSharpPointerType> _pointerTypes = [];
+
+    public Dictionary<Type, CSharpClass> PredefinedClasses
+    {
+        get => _predefinedClasses;
+        init
+        {
+            _predefinedClasses = value;
+            foreach (var @class in value.Values)
+            {
+                AddClass(@class);
+            }
+        }
+    }
+
+    public Dictionary<Type, CSharpFile> PredefinedFiles
+    {
+        get => _predefinedFiles;
+        init
+        {
+            _predefinedFiles = value;
+            foreach (var file in value.Values)
+            {
+                AddFile(file);
+            }
+        }
+    }
     
     public IEnumerable<CSharpDefinition> Definitions => Enums.Concat<CSharpDefinition>(Structs).Concat(Methods).Concat(Delegates).Concat(Constants);
 
+    public CSharpContext(string @namespace)
+    {
+        Namespace = @namespace;
+    }
+    
     public void AddPreprocessor(IDefinitionPreprocess preprocessor)
     {
         _preprocessors.Add(preprocessor);
@@ -129,7 +116,7 @@ public class CSharpContext
         var file = Files.Find(f => f.FileName == filename);
         if (file == null)
         {
-            file = new CSharpFile(filename, DefaultNamespace);
+            file = new CSharpFile(filename, Namespace);
             AddFile(file);
         }
         file.Definitions.Add(definition);
@@ -168,56 +155,70 @@ public class CSharpContext
     
     public void AddEnum(CSharpEnum @enum)
     {
-        if (HasType(@enum))
-            return;
+        // if (HasType(@enum))
+        //     return;
         
         Enums.Add(@enum);
         AddType(@enum.Name, new CSharpType(@enum.Name));
-        AddDefinitionToFile(@enum, EnumFileName);
+        
+        if (_predefinedFiles.ContainsKey(@enum.GetType()))
+            AddDefinitionToFile(@enum, _predefinedFiles[@enum.GetType()].FileName);
     }
     
     public void AddStruct(CSharpStruct @struct)
     {
-        if (HasType(@struct))
-            return;
+        // if (HasType(@struct))
+        //     return;
 
         Structs.Add(@struct);
         AddType(@struct.Name, new CSharpType(@struct.Name));
-        AddDefinitionToFile(@struct, StructFileName);
+        
+        if (_predefinedFiles.ContainsKey(@struct.GetType()))
+            AddDefinitionToFile(@struct, _predefinedFiles[@struct.GetType()].FileName);
     }
 
     public void AddClass(CSharpClass @class)
     {
-        if (HasType(@class))
-            return;
+        // if (HasType(@class))
+        //     return;
 
         Classes.Add(@class);
         AddType(@class.Name, new CSharpType(@class.Name));
+        
+        if (_predefinedFiles.ContainsKey(@class.GetType()))
+            AddDefinitionToFile(@class, _predefinedFiles[@class.GetType()].FileName);
     }
     
     public void AddDelegate(CSharpDelegate @delegate)
     {
-        if (HasType(@delegate))
-            return;
+        // if (HasType(@delegate))
+        //     return;
 
         Delegates.Add(@delegate);
         AddType(@delegate.Name, new CSharpType(@delegate.Name));
+        
+        if (_predefinedFiles.ContainsKey(@delegate.GetType()))
+            AddDefinitionToFile(@delegate, _predefinedFiles[@delegate.GetType()].FileName);
     }
     
     public void AddMethod(CSharpMethod csharpMethod)
     {
         Methods.Add(csharpMethod);
-        Classes.First(c => c.Name == ImGuiNativeClassName).Definitions.Add(csharpMethod);
+        
+        if (_predefinedClasses.ContainsKey(csharpMethod.GetType()))
+            Classes.First(c => c.Name == _predefinedClasses[csharpMethod.GetType()].Name).Definitions.Add(csharpMethod);
     }
 
     public void AddConstant(CSharpConstant constant)
     {
-        if (HasType(constant))
-            return;
+        // if (HasType(constant))
+        //     return;
 
         Constants.Add(constant);
         AddType(constant.Name, new CSharpType(constant.Name));
-        Classes.First(c => c.Name == ImGuiConstClassName).Definitions.Add(constant);
+
+        if (_predefinedClasses.ContainsKey(constant.GetType()))
+            Classes.First(c => c.Name == _predefinedClasses[constant.GetType()].Name).Definitions.Add(constant);
     }
     
     public void WriteAllFiles(string outputDir)
@@ -255,23 +256,23 @@ public class CSharpContext
 
     private void PlaceDefinitionsInFiles()
     {
-        var constClass = Classes.First(c => c.Name == ImGuiConstClassName);
-        var functionClass = Classes.First(c => c.Name == ImGuiNativeClassName);
-        
-        AddDefinitionToFile(constClass, ConstantFileName);
-        AddDefinitionToFile(functionClass, MethodFileName);
-        foreach (var @delegate in Delegates)
+        foreach (var (type, @class) in _predefinedClasses)
         {
-            AddDefinitionToFile(@delegate, DelegateFileName);
+            if (_predefinedFiles.TryGetValue(type, out var file))
+            {
+                AddDefinitionToFile(@class, file.FileName);
+            }
         }
         
+        const string undefinedFileName = "Undefined.cs";
         var definitions = new List<CSharpDefinition>();
         definitions.AddRange(Enums.Where(e => e.File == null));
         definitions.AddRange(Structs.Where(s => s.File == null));
         definitions.AddRange(Classes.Where(s => s.File == null));
         
-        var defaultFile = new CSharpFile(UndefinedFileName, DefaultNamespace, ["System"], definitions.ToArray());
+        var defaultFile = new CSharpFile(undefinedFileName, Namespace, ["System"], definitions.ToArray());
         AddFile(defaultFile);
     }
+
 }
 

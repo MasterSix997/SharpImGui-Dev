@@ -9,26 +9,63 @@ using SharpImGui_Dev.CodeGenerator.Passes;
 
 namespace SharpImGui_Dev.CodeGenerator
 {
-    public struct GenerationConfig
+    public record GenerationConfig(string MetadataFile, string OutputPath, string Namespace)
     {
-        public string OutputPath { get; set; }
-        public string Namespace { get; set; }
-        //
-        public Dictionary<Type, string> DefinitionsClasses;
-        public Dictionary<Type, CSharpFile> Files;
+        public string MetadataFile { get; } = MetadataFile;
+        public string OutputPath { get; } = OutputPath;
+        public string Namespace { get; } = Namespace;
+
+        public Dictionary<Type, CSharpClass> PredefinedClasses = new();
+        public Dictionary<Type, CSharpFile> PredefinedFiles = new();
     }
     
     public class Generator
     {
         private static readonly string ProjectPath = Path.Combine("../../../");
         private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
-        private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
+        // private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
+
+        private List<GenerationConfig> _configs =
+        [
+            new GenerationConfig("dcimgui.json", Path.Combine(ProjectPath, "../SharpImGui/Generated"), "SharpImGui")
+            {
+                PredefinedClasses =
+                {
+                    [typeof(CSharpConstant)] = new CSharpClass("ImGuiConstants") { Modifiers = ["public", "static", "partial"]},
+                    [typeof(CSharpMethod)] = new CSharpClass("ImGuiNative") { Modifiers = ["public", "static", "unsafe", "partial"] } 
+                },
+                PredefinedFiles =
+                {
+                    [typeof(CSharpEnum)] = new CSharpFile("Enums.gen.cs", "SharpImGui", ["System"]),
+                    [typeof(CSharpStruct)] = new CSharpFile("Structs.gen.cs", "SharpImGui", ["System", "System.Numerics"]),
+                    [typeof(CSharpDelegate)] = new CSharpFile("Delegates.gen.cs", "SharpImGui", ["System", "System.Runtime.InteropServices"]),
+                    [typeof(CSharpMethod)] = new CSharpFile("ImGuiNative.gen.cs", "SharpImGui", ["System", "System.Runtime.InteropServices", "System.Numerics"]),
+                    [typeof(CSharpConstant)] = new CSharpFile("Constants.gen.cs", "SharpImGui", ["System"])
+                }
+            },
+            new GenerationConfig("dcimgui_internal.json", Path.Combine(ProjectPath, "../SharpImGui/Generated/Internal"), "SharpImGui.Internal")
+            {
+                PredefinedClasses =
+                {
+                    [typeof(CSharpConstant)] = new CSharpClass("ImGuiConstantsInternal") { Modifiers = ["public", "static", "partial"]},
+                    [typeof(CSharpMethod)] = new CSharpClass("ImGuiNativeInternal") { Modifiers = ["public", "static", "unsafe", "partial"] } 
+                },
+                PredefinedFiles =
+                {
+                    [typeof(CSharpEnum)] = new CSharpFile("Enums.gen.cs", "SharpImGui.Internal", ["System"]),
+                    [typeof(CSharpStruct)] = new CSharpFile("Structs.gen.cs", "SharpImGui.Internal", ["System", "System.Numerics"]),
+                    [typeof(CSharpDelegate)] = new CSharpFile("Delegates.gen.cs", "SharpImGui.Internal", ["System", "System.Runtime.InteropServices"]),
+                    [typeof(CSharpMethod)] = new CSharpFile("ImGuiNative.gen.cs", "SharpImGui.Internal", ["System", "System.Runtime.InteropServices", "System.Numerics"]),
+                    [typeof(CSharpConstant)] = new CSharpFile("Constants.gen.cs", "SharpImGui.Internal", ["System"])
+                }
+            },
+        ];
         
-        private CSharpContext _csharpContext;
+        private CSharpContext _csharpContext = null!;
         
-        private List<string> _skippedItems = [];
-        private static Dictionary<string, int> _arraySizes = new();
-        private static Dictionary<string, string> knownDefines = new()
+        private readonly List<string> _skippedItems = [];
+        private static readonly Dictionary<string, int> ArraySizes = new();
+        private static readonly Dictionary<string, string> KnownDefines = new()
         {
             ["IMGUI_DISABLE_OBSOLETE_FUNCTIONS"] = "",
             ["IMGUI_DISABLE_OBSOLETE_KEYIO"] = ""
@@ -36,16 +73,59 @@ namespace SharpImGui_Dev.CodeGenerator
         
         public void Generate()
         {
-            _csharpContext = new CSharpContext();
+            foreach (var config in _configs)
+            {
+                CreateContext(config);
+                GenerateBindings(config.MetadataFile);
+
+                if (Directory.Exists(config.OutputPath))
+                    Directory.Delete(config.OutputPath, true);
+                _csharpContext.WriteAllFiles(config.OutputPath);
+            }
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine("Generated!");
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"Skipped items: {_skippedItems.Count}");
+            Console.ResetColor();
+        }
+
+        private void CreateContext(GenerationConfig config)
+        {
+            var typeMap = _csharpContext?.TypeMap ?? new Dictionary<string, CSharpType>
+            {
+                ["int"] = new CSharpType("int"),
+                ["unsigned int"] = new CSharpType("uint"),
+                ["unsigned char"] = new CSharpType("byte"),
+                ["unsigned_char"] = new CSharpType("byte"),
+                ["unsigned_int"] = new CSharpType("uint"),
+                ["unsigned_short"] = new CSharpType("ushort"),
+                ["long long"] = new CSharpType("long"),
+                ["long_long"] = new CSharpType("long"),
+                ["unsigned_long_long"] = new CSharpType("ulong"),
+                ["short"] = new CSharpType("short"),
+                ["signed char"] = new CSharpType("sbyte"),
+                ["signed short"] = new CSharpType("short"),
+                ["signed int"] = new CSharpType("int"),
+                ["signed long long"] = new CSharpType("long"),
+                ["unsigned long long"] = new CSharpType("ulong"),
+                ["unsigned short"] = new CSharpType("ushort"),
+                ["float"] = new CSharpType("float"),
+                ["bool"] = new CSharpType("bool"),
+                ["char"] = new CSharpType("char"),
+                ["double"] = new CSharpType("double"),
+                ["void"] = new CSharpType("void"),
+                ["va_list"] = new CSharpType("va_list"),
+                ["size_t"] = new CSharpType("ulong"), // assume only x64 for now
+            };
+            _csharpContext = new CSharpContext(config.Namespace)
+            {
+                PredefinedClasses = config.PredefinedClasses,
+                PredefinedFiles = config.PredefinedFiles,
+                TypeMap = typeMap
+            };
             _csharpContext.AddPreprocessor(new CommentPreprocessor());
             _csharpContext.AddPreprocessor(new NamingPreprocessor());
             _csharpContext.AddPreprocessor(new TypesPreprocessor());
-            
-            GenerateBindings("dcimgui.json");
-
-            if (Directory.Exists(_outputPath))
-                Directory.Delete(_outputPath, true);
-            _csharpContext.WriteAllFiles(_outputPath);
         }
 
         private void GenerateBindings(string metadataFile)
@@ -72,9 +152,9 @@ namespace SharpImGui_Dev.CodeGenerator
             // dear_bindings writes defines in a strange manner, producing redefines, so when we group them by count, we can produce more accurate result
             var defineGroups = defines.GroupBy(x => x.Conditionals?.Count ?? 0);
 
-            foreach (var key in knownDefines.Keys)
+            foreach (var key in KnownDefines.Keys)
             {
-                _csharpContext.AddConstant(new CSharpConstant(key, new CSharpType("string"), $"\"{knownDefines[key].Replace("\"", "\\\"")}\""));
+                _csharpContext.AddConstant(new CSharpConstant(key, new CSharpType("string"), $"\"{KnownDefines[key].Replace("\"", "\\\"")}\""));
             }
 
             foreach (var group in defineGroups)
@@ -86,7 +166,7 @@ namespace SharpImGui_Dev.CodeGenerator
                         var constant = GenerateConstant(define);
                         AttachComments(define.Comments, constant);
                         _csharpContext.AddConstant(constant);
-                        knownDefines[define.Name] = define.Content?? "";
+                        KnownDefines[define.Name] = define.Content?? "";
                     }
                 }
                 else if (group.Key == 1)
@@ -102,12 +182,12 @@ namespace SharpImGui_Dev.CodeGenerator
                         var constant = GenerateConstant(define);
                         AttachComments(define.Comments, constant);
                         _csharpContext.AddConstant(constant);
-                        knownDefines[define.Name] = define.Content?? "";
+                        KnownDefines[define.Name] = define.Content?? "";
                     }
                 }
                 else
                 {
-                    Dictionary<string, string> newDefines = new();
+                    // Dictionary<string, string> newDefines = new();
                     foreach (var define in group)
                     {
                         if (!EvalConditionals(define.Conditionals))
@@ -118,13 +198,15 @@ namespace SharpImGui_Dev.CodeGenerator
                         
                         var constant = GenerateConstant(define);
                         AttachComments(define.Comments, constant);
-                        newDefines[define.Name] = define.Content?? "";
+                        _csharpContext.AddConstant(constant);
+                        // newDefines[define.Name] = define.Content?? "";
+                        KnownDefines[define.Name] = define.Content?? "";
                     }
 
-                    foreach (var key in newDefines.Keys)
-                    {
-                        knownDefines[key] = newDefines[key];
-                    }
+                    // foreach (var key in newDefines.Keys)
+                    // {
+                    //     KnownDefines[key] = newDefines[key];
+                    // }
                 }
             }
 
@@ -136,19 +218,15 @@ namespace SharpImGui_Dev.CodeGenerator
                 {
                     return new CSharpConstant(defineItem.Name, new CSharpType("bool"), "true");
                 }
-                else if (knownDefines.ContainsKey(defineItem.Content))
+                else if (KnownDefines.ContainsKey(defineItem.Content))
                 {
-                    return new CSharpConstant(defineItem.Name, new CSharpType("bool"), defineItem.Content);
+                    var contentConstant = _csharpContext.Constants.FirstOrDefault(c => c.Name == defineItem.Content, null);
+                    var type = contentConstant?.Type ?? new CSharpType("bool");
+                    return new CSharpConstant(defineItem.Name, type, defineItem.Content);
                 }
                 else if (defineItem.Content.StartsWith("0x") &&
-                         long.TryParse(
-                             defineItem.Content.AsSpan(2),
-                             NumberStyles.HexNumber,
-                             NumberFormatInfo.InvariantInfo,
-                             out _
-                         ) ||
-                         long.TryParse(defineItem.Content, out _)
-                        )
+                         long.TryParse(defineItem.Content.AsSpan(2), NumberStyles.HexNumber, NumberFormatInfo.InvariantInfo, out _) ||
+                         long.TryParse(defineItem.Content, out _))
                 {
                     return new CSharpConstant(defineItem.Name, new CSharpType("long"), defineItem.Content);
                 }
@@ -226,7 +304,7 @@ namespace SharpImGui_Dev.CodeGenerator
 
                     if (csharpElement.Name.Contains("COUNT", StringComparison.Ordinal))
                     {
-                        _arraySizes[csharpElement.Name] = int.Parse(csharpElement.Value);
+                        ArraySizes[csharpElement.Name] = int.Parse(csharpElement.Value);
                     }
                     
                     csharpEnum.Elements.Add(csharpElement);
@@ -262,14 +340,14 @@ namespace SharpImGui_Dev.CodeGenerator
                     if (nativeField.IsArray)
                     {
                         var arrayType = GetCSharpType(nativeType.InnerType!);//field.Type.Description.InnerType!.Name;
-                        var arraySize = _arraySizes.GetValueOrDefault(nativeField.ArrayBounds, 0);
+                        var arraySize = ArraySizes.GetValueOrDefault(nativeField.ArrayBounds, 0);
                         var elementName = nativeField.Name;
                 
                         for (int k = 0; k < arraySize; k++)
                         {
                             csharpStruct.Definitions.Add(new CSharpField($"{elementName}_{k}", arrayType)
                             {
-                                Modifiers = {"public"},
+                                Modifiers = arrayType.IsPointer ? ["public", "unsafe"] : ["public"]
                             });
                         }
                         continue;
@@ -395,7 +473,7 @@ namespace SharpImGui_Dev.CodeGenerator
             {
                 return name switch
                 {
-                    "ref" or "out" or "var" or "in" => true,
+                    "ref" or "out" or "var" or "in" or "base" => true,
                     _ => false
                 };
             }
@@ -449,16 +527,16 @@ namespace SharpImGui_Dev.CodeGenerator
                 if (conditionals.Count == 1)
                 {
                     var condition = conditionals[0];
-                    return (condition.Condition == "ifdef" && knownDefines.ContainsKey(condition.Expression)) ||
-                           (condition.Condition == "ifndef" && !knownDefines.ContainsKey(condition.Expression)) ||
+                    return (condition.Condition == "ifdef" && KnownDefines.ContainsKey(condition.Expression)) ||
+                           (condition.Condition == "ifndef" && !KnownDefines.ContainsKey(condition.Expression)) ||
                            (condition.Condition == "if" && condition.Expression.StartsWith("defined") && !condition.Expression.StartsWith("&&") && 
-                            knownDefines.ContainsKey(condition.Expression.Substring(8, condition.Expression.Length - 8 - 1)));
+                            KnownDefines.ContainsKey(condition.Expression.Substring(8, condition.Expression.Length - 8 - 1)));
                 }
                 else
                 {
                     var condition = conditionals[1];
-                    return (condition.Condition == "ifdef" && knownDefines.ContainsKey(condition.Expression)) ||
-                           (condition.Condition == "ifndef" && !knownDefines.ContainsKey(condition.Expression));
+                    return (condition.Condition == "ifdef" && KnownDefines.ContainsKey(condition.Expression)) ||
+                           (condition.Condition == "ifndef" && !KnownDefines.ContainsKey(condition.Expression));
                 }
             }
             else

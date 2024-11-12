@@ -13,6 +13,8 @@ public class CodeWriter : IDisposable, IAsyncDisposable
     
     private int _currentIndentLevel;
     private string _currentIndent = "";
+    
+    private bool _isFirstDefinition = true;
 
     public CodeWriter(CSharpFile csharpFile, string outputPath)
     {
@@ -136,6 +138,8 @@ public class CodeWriter : IDisposable, IAsyncDisposable
             default:
                 throw new NotImplementedException();
         }
+        
+        _isFirstDefinition = false;
     }
 
     private void WriteAttributes(IReadOnlyCollection<string> attributes)
@@ -182,7 +186,9 @@ public class CodeWriter : IDisposable, IAsyncDisposable
 
     private void WriteEnum(CSharpEnum csharpEnum)
     {
-        WriteLine();
+        if (!_isFirstDefinition)
+            WriteLine();
+        
         WriteSummaries(csharpEnum);
         WriteAttributes(csharpEnum.Attributes);
         
@@ -200,7 +206,9 @@ public class CodeWriter : IDisposable, IAsyncDisposable
 
     private void WriteContainer(CSharpContainer csharpContainer, string keyword)
     {
-        WriteLine();
+        if (!_isFirstDefinition)
+            WriteLine();
+
         WriteSummaries(csharpContainer);
         WriteAttributes(csharpContainer.Attributes);
 
@@ -213,6 +221,7 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         EndLine();
         PushBlock();
 
+        _isFirstDefinition = true;
         WriteCSharpDefinitions(csharpContainer.Definitions);
         
         PopBlock();
@@ -244,10 +253,7 @@ public class CodeWriter : IDisposable, IAsyncDisposable
             Write($"{string.Join(" ", csharpConstant.Modifiers)} ");
         Write("const ");
         Write(csharpConstant.Type.TypeName);
-        if (csharpConstant.Type.IsPointer)
-            Write($"* ");
-        else
-            Write(" ");
+        Write(csharpConstant.Type.IsPointer ? "* " : " ");
         Write(csharpConstant.Name);
         Write(" = ");
         Write(csharpConstant.Value);
@@ -257,7 +263,9 @@ public class CodeWriter : IDisposable, IAsyncDisposable
     
     private void WriteMethod(CSharpMethod csharpMethod)
     {
-        WriteLine();
+        if (!_isFirstDefinition)
+            WriteLine();
+        
         WriteSummaries(csharpMethod);
         WriteAttributes(csharpMethod.Attributes);
             
@@ -265,24 +273,9 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         if (csharpMethod.Modifiers.Count > 0)
             Write($"{string.Join(" ", csharpMethod.Modifiers)} ");
         Write(csharpMethod.ReturnType.TypeName);
-        if (csharpMethod.ReturnType.IsPointer)
-            Write($"* ");
-        else
-            Write(" ");
+        Write(csharpMethod.ReturnType.IsPointer ? "* " : " ");
         Write(csharpMethod.Name);
-        Write("(");
-        foreach (var parameter in csharpMethod.Parameters)
-        {
-            Write(parameter.Type.TypeName);
-            if (parameter.Type.IsPointer)
-                Write($"* ");
-            else
-                Write(" ");
-            Write(parameter.Name);
-            if (parameter!= csharpMethod.Parameters.Last())
-                Write(", ");
-        }
-        Write(")");
+        WriteParams(csharpMethod.Parameters);
         Write(";");
         EndLine();
     }
@@ -296,27 +289,29 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         if (csharpDelegate.Modifiers.Count > 0)
             Write($"{string.Join(" ", csharpDelegate.Modifiers)} ");
         Write(csharpDelegate.ReturnType.TypeName);
-        if (csharpDelegate.ReturnType.IsPointer)
-            Write($"* ");
-        else
-            Write(" ");
+        Write(csharpDelegate.ReturnType.IsPointer ? "* " : " ");
         Write(csharpDelegate.Name);
-        Write("(");
-        foreach (var parameter in csharpDelegate.Parameters)
-        {
-            Write(parameter.Type.TypeName);
-            if (parameter.Type.IsPointer)
-                Write($"* ");
-            else
-                Write(" ");
-            Write(parameter.Name);
-            if (parameter != csharpDelegate.Parameters.Last())
-                Write(", ");
-        }
-
-        Write(")");
+        WriteParams(csharpDelegate.Parameters);
         Write(";");
         EndLine();
+    }
+
+    private void WriteParams(IReadOnlyList<CSharpParameter> parameters)
+    {
+        Write("(");
+        for (var i = 0; i < parameters.Count; i++)
+        {
+            var parameter = parameters[i];
+            Write(parameter.Type.TypeName);
+            Write(parameter.Type.IsPointer ? "* " : " ");
+            if (string.IsNullOrEmpty(parameter.Name))
+                Write("arg" + i);
+            else
+                Write(parameter.Name);
+            if (i < parameters.Count - 1)
+                Write(", ");
+        }
+        Write(")");
     }
 
     public void Dispose()
