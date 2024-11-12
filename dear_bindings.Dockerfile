@@ -6,7 +6,8 @@ WORKDIR /dear_bindings
 RUN apk update
 RUN apk add git openssh-client
 RUN git clone https://github.com/dearimgui/dear_bindings.git .
-RUN git clone https://github.com/ocornut/imgui.git imgui
+RUN git config --global http.postBuffer 524288000
+RUN git clone --depth 1 https://github.com/ocornut/imgui.git imgui
 
 # Run Python Code Generator
 FROM python AS generator
@@ -21,54 +22,38 @@ FROM ubuntu:20.04 AS compile-windows-x64
 WORKDIR /dcimgui
 COPY --from=generator /dear_bindings .
 RUN apt-get update && apt-get install -y mingw-w64
-# dcimgui_x64.dll
 RUN x86_64-w64-mingw32-gcc -std=c++11 -shared -DCIMGUI_API='extern "C" __declspec(dllexport)' -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
     -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui_x64.dll -I. -Iimgui -limm32 -lstdc++ \
-    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
-# dcimgui_internal_x64.dll
-RUN x86_64-w64-mingw32-gcc -std=c++11 -shared -DCIMGUI_API='extern "C" __declspec(dllexport)' -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui_internal_x64.dll -I. -Iimgui -limm32 -lstdc++ \
-    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
+    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm \
+    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h
 
 # Compile for Windows x86
 FROM ubuntu:20.04 AS compile-windows-x86
 WORKDIR /dcimgui
 COPY --from=generator /dear_bindings .
 RUN apt-get update && apt-get install -y mingw-w64
-# dcimgui_x86.dll
 RUN i686-w64-mingw32-gcc -std=c++11 -shared -DCIMGUI_API='extern "C" __declspec(dllexport)' -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
     -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui_x86.dll -I. -Iimgui -limm32 -lstdc++ \
-    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
-# dcimgui_internal_x86.dll
-RUN i686-w64-mingw32-gcc -std=c++11 -shared -DCIMGUI_API='extern "C" __declspec(dllexport)' -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui_internal_x86.dll -I. -Iimgui -limm32 -lstdc++ \
-    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
+    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm \
+    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h
 
 # Compile for macOS ARM
 FROM --platform=linux/amd64 ghcr.io/shepherdjerred/macos-cross-compiler AS compile-macos-arm
 WORKDIR /workspace
 COPY --from=generator /dear_bindings .
-# dcimgui.dylib
 RUN aarch64-apple-darwin22-gcc -std=c++11 -shared -fPIC -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
     -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui.dylib -I. -Iimgui \
-    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm -lstdc++ 
-# dcimgui_internal.dylib
-RUN aarch64-apple-darwin22-gcc -std=c++11 -shared -fPIC -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui_internal.dylib -I. -Iimgui \
-    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
+    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm -lstdc++ \
+    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h
 
 # Compile for Linux
 FROM gcc AS compile-linux
 WORKDIR /dcimgui
 COPY --from=generator /dear_bindings .
-# dcimgui.so
 RUN gcc -std=c++11 -shared -fPIC -DCIMGUI_API='extern "C"' -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
     -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui.so -Iimgui -I. -Wall \
-    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm -lstdc++
-# dcimgui_internal.so
-RUN gcc -std=c++11 -shared -fPIC -DCIMGUI_API='extern "C"' -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -O2 -fno-exceptions -fno-rtti -fno-threadsafe-statics -o dcimgui_internal.so -Iimgui -I. -Wall \
-    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
+    -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm -lstdc++ \
+    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h
 
 # Compile for Android (ARM and x86)
 FROM ubuntu:20.04 AS compile-android
@@ -79,36 +64,22 @@ RUN wget https://dl.google.com/android/repository/android-ndk-r21e-linux-x86_64.
 ENV ANDROID_NDK_HOME=/dcimgui/android-ndk-r21e
 ENV PATH=$PATH:$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin
 # Compilar para ARM
-# dcimgui_arm.so
 RUN aarch64-linux-android21-clang++ -std=c++11 -shared -fPIC -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -o libdcimgui_arm.so -I. -Iimgui -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
-# dcimgui_internal_arm.so
-RUN aarch64-linux-android21-clang++ -std=c++11 -shared -fPIC -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -o libdcimgui_internal_arm.so -I. -Iimgui -x c++ dcimgui_internal.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
-
+    -o libdcimgui_arm.so -I. -Iimgui -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm \
+    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h
 # Compilar para x86
-# dcimgui_x86.so
 RUN i686-linux-android21-clang++ -std=c++11 -shared -fPIC -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -o libdcimgui_x86.so -I. -Iimgui -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
-# dcimgui_internal_x86.so
-RUN i686-linux-android21-clang++ -std=c++11 -shared -fPIC -DIMGUI_STATIC -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1 \
-    -o libdcimgui_internal_x86.so -I. -Iimgui -x c++ dcimgui_internal.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm
-
+    -o libdcimgui_x86.so -I. -Iimgui -x c++ dcimgui.cpp imgui/imgui.cpp imgui/imgui_demo.cpp imgui/imgui_draw.cpp imgui/imgui_tables.cpp imgui/imgui_widgets.cpp -lm \
+    -x c++ dcimgui_internal.cpp imgui/imgui_internal.h
 
 # Final stage to gather all artifacts
 FROM alpine AS final
 COPY --from=compile-linux /dcimgui/dcimgui.so /final/dcimgui.so
-COPY --from=compile-linux /dcimgui/dcimgui_internal.so /final/dcimgui_internal.so
 COPY --from=compile-windows-x64 /dcimgui/dcimgui_x64.dll /final/dcimgui_x64.dll
-COPY --from=compile-windows-x64 /dcimgui/dcimgui_internal_x64.dll /final/dcimgui_internal_x64.dll
 COPY --from=compile-windows-x86 /dcimgui/dcimgui_x86.dll /final/dcimgui_x86.dll
-COPY --from=compile-windows-x86 /dcimgui/dcimgui_internal_x86.dll /final/dcimgui_internal_x86.dll
 COPY --from=compile-macos-arm /workspace/dcimgui.dylib /final/dcimgui.dylib
-COPY --from=compile-macos-arm /workspace/dcimgui_internal.dylib /final/dcimgui_internal.dylib
 COPY --from=compile-android /dcimgui/libdcimgui_arm.so /final/libdcimgui_arm.so
-COPY --from=compile-android /dcimgui/libdcimgui_internal_arm.so /final/libdcimgui_internal_arm.so
 COPY --from=compile-android /dcimgui/libdcimgui_x86.so /final/libdcimgui_x86.so
-COPY --from=compile-android /dcimgui/libdcimgui_internal_x86.so /final/libdcimgui_internal_x86.so
 
 COPY --from=generator /dear_bindings/dcimgui.json /final/dcimgui.json
 COPY --from=generator /dear_bindings/dcimgui.h /final/dcimgui.h

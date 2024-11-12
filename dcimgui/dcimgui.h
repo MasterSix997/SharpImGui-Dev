@@ -2,7 +2,7 @@
 // **DO NOT EDIT DIRECTLY**
 // https://github.com/dearimgui/dear_bindings
 
-// dear imgui, v1.91.5
+// dear imgui, v1.91.6 WIP
 // (headers)
 
 // Help:
@@ -32,8 +32,8 @@
 
 // Library Version
 // (Integer encoded as XYYZZ for use in #if preprocessor conditionals, e.g. '#if IMGUI_VERSION_NUM >= 12345')
-#define IMGUI_VERSION       "1.91.5"
-#define IMGUI_VERSION_NUM   19150
+#define IMGUI_VERSION       "1.91.6 WIP"
+#define IMGUI_VERSION_NUM   19151
 #define IMGUI_HAS_TABLE
 
 /*
