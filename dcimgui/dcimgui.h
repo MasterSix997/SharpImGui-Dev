@@ -1030,7 +1030,7 @@ CIMGUI_API ImGuiViewport* ImGui_GetMainViewport(void);  // return primary/defaul
 
 // Background/Foreground Draw Lists
 CIMGUI_API ImDrawList* ImGui_GetBackgroundDrawList(void);  // this draw list will be the first rendered one. Useful to quickly draw shapes/text behind dear imgui contents.
-CIMGUI_API ImDrawList* ImGui_GetForegroundDrawList(void);  // this draw list will be the last rendered one. Useful to quickly draw shapes/text over dear imgui contents.
+CIMGUI_API ImDrawListImDrawList* ImGui_GetForegroundDrawList(void);  // this draw list will be the last rendered one. Useful to quickly draw shapes/text over dear imgui contents.
 
 // Miscellaneous Utilities
 CIMGUI_API bool                  ImGui_IsRectVisibleBySize(ImVec2 size);                 // test if rectangle (of given size, starting from cursor position) is visible / not clipped.

@@ -11,6 +11,7 @@
         Variable,
         Constant,
         Delegate,
-        Parameter
+        Parameter,
+        Code
     }
 }

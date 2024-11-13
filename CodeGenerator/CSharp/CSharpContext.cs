@@ -224,13 +224,13 @@ public class CSharpContext
     public void WriteAllFiles(string outputDir)
     {
         TryFindUnresolvedTypes();
+        PlaceDefinitionsInFiles();
         
         foreach (var preprocessor in _preprocessors)
         {
             preprocessor.Preprocess(this);
         }
         
-        PlaceDefinitionsInFiles();
         foreach (var file in Files.Where(file => file.Definitions.Count > 0))
         {
             using var write = new CodeWriter(file, outputDir);

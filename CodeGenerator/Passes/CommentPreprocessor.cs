@@ -7,7 +7,16 @@ public class CommentPreprocessor : IDefinitionPreprocess
 {
     public void Preprocess(CSharpContext context)
     {
-        ProcessDefinitions(context.Definitions);
+        // ProcessDefinitions(context.Definitions);
+        ProcessFiles(context.Files);
+    }
+    
+    private static void ProcessFiles(List<CSharpFile> files)
+    {
+        foreach (var file in files)
+        {
+            ProcessDefinitions(file.Definitions);
+        }
     }
     
     private static void ProcessDefinitions(IEnumerable<CSharpDefinition> definitions)

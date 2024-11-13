@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Text;
 
 namespace SharpImGui_Dev.CodeGenerator.CSharp
 {
@@ -14,6 +15,42 @@ namespace SharpImGui_Dev.CodeGenerator.CSharp
         public List<string> PrecedingComments { get; set; } = [];
         
         public CSharpFile? File { get; set; }
+    }
+    
+    public class CSharpCode(string code) : CSharpDefinition("code", CSharpKind.Code)
+    {
+        public class CodeBuilder(StringBuilder builder)
+        {
+            public void Write(string text)
+            {
+                builder.Append(text);
+            }
+            
+            public void WriteLine(string line)
+            {
+                builder.AppendLine(line);
+            }
+            
+            public void WriteLine()
+            {
+                builder.AppendLine();
+            }
+        }
+        
+        public string Code { get; set; } = code;
+        
+        private static readonly StringBuilder Builder = new();
+
+        public static CodeBuilder Begin()
+        {
+            Builder.Clear();
+            return new CodeBuilder(Builder);
+        }
+        
+        public static CSharpCode End()
+        {
+            return new CSharpCode(Builder.ToString());
+        } 
     }
 
     public class CSharpType(string typeName, bool isPointer = false)
@@ -65,6 +102,7 @@ namespace SharpImGui_Dev.CodeGenerator.CSharp
     public class CSharpField(string name, CSharpType type) : CSharpDefinition(name, CSharpKind.Field)
     {
         public CSharpType Type { get; set; } = type;
+        public string? Initializer { get; set; }
     }
     
     public class CSharpConstant(string name, CSharpType type, string value) : CSharpDefinition(name, CSharpKind.Constant)
@@ -92,7 +130,64 @@ namespace SharpImGui_Dev.CodeGenerator.CSharp
     {
         public CSharpType ReturnType { get; set; } = returnType;
         public List<CSharpParameter> Parameters { get; set; } = [];
-        public CSharpDefinition? Body { get; set; }
+        public string? Body { get; set; }
+        public bool Inline { get; set; } = false;
+    }
+
+    public static class CSharpMethodExtensions
+    {
+        public static CSharpMethod NewMethod() => new("", CSharpType.Unknown);
+
+        public static CSharpMethod WithName(this CSharpMethod method, string name)
+        {
+            var newMethod = new CSharpMethod(name, method.ReturnType)
+            {
+                Modifiers = method.Modifiers,
+                Attributes = method.Attributes,
+                PrecedingComments = method.PrecedingComments,
+                TrailingComment = method.TrailingComment
+            };
+            return newMethod;
+        }
+        
+        public static CSharpMethod WithReturnType(this CSharpMethod method, CSharpType returnType)
+        {
+            var newMethod = new CSharpMethod(method.Name, returnType)
+            {
+                Modifiers = method.Modifiers,
+                Attributes = method.Attributes,
+                PrecedingComments = method.PrecedingComments,
+                TrailingComment = method.TrailingComment
+            };
+            return newMethod;
+        }
+        
+        public static CSharpMethod WithParameter(this CSharpMethod method, CSharpParameter parameter)
+        {
+            var newMethod = new CSharpMethod(method.Name, method.ReturnType)
+            {
+                Modifiers = method.Modifiers,
+                Attributes = method.Attributes,
+                PrecedingComments = method.PrecedingComments,
+                TrailingComment = method.TrailingComment,
+                Parameters = new List<CSharpParameter>(method.Parameters) { parameter }
+            };
+            return newMethod;
+        }
+        
+        public static CSharpMethod WithBody(this CSharpMethod method, string body)
+        {
+            var newMethod = new CSharpMethod(method.Name, method.ReturnType)
+            {
+                Modifiers = method.Modifiers,
+                Attributes = method.Attributes,
+                PrecedingComments = method.PrecedingComments,
+                TrailingComment = method.TrailingComment,
+                Parameters = method.Parameters,
+                Body = body
+            };
+            return newMethod;
+        }
     }
 
     public class CSharpDelegate(string name, CSharpType returnType) : CSharpDefinition(name, CSharpKind.Delegate)

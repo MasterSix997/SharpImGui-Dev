@@ -37,7 +37,7 @@ namespace SharpImGui_Dev.CodeGenerator
                 PredefinedFiles =
                 {
                     [typeof(CSharpEnum)] = new CSharpFile("Enums.gen.cs", "SharpImGui", ["System"]),
-                    [typeof(CSharpStruct)] = new CSharpFile("Structs.gen.cs", "SharpImGui", ["System", "System.Numerics"]),
+                    //[typeof(CSharpStruct)] = new CSharpFile("Structs.gen.cs", "SharpImGui", ["System", "System.Numerics"]),
                     [typeof(CSharpDelegate)] = new CSharpFile("Delegates.gen.cs", "SharpImGui", ["System", "System.Runtime.InteropServices"]),
                     [typeof(CSharpMethod)] = new CSharpFile("ImGuiNative.gen.cs", "SharpImGui", ["System", "System.Runtime.InteropServices", "System.Numerics"]),
                     [typeof(CSharpConstant)] = new CSharpFile("Constants.gen.cs", "SharpImGui", ["System"])
@@ -48,12 +48,12 @@ namespace SharpImGui_Dev.CodeGenerator
                 PredefinedClasses =
                 {
                     [typeof(CSharpConstant)] = new CSharpClass("ImGuiConstantsInternal") { Modifiers = ["public", "static", "partial"]},
-                    [typeof(CSharpMethod)] = new CSharpClass("ImGuiNativeInternal") { Modifiers = ["public", "static", "unsafe", "partial"] } 
+                    [typeof(CSharpMethod)] = new CSharpClass("ImGuiInternalNative") { Modifiers = ["public", "static", "unsafe", "partial"] } 
                 },
                 PredefinedFiles =
                 {
                     [typeof(CSharpEnum)] = new CSharpFile("Enums.gen.cs", "SharpImGui.Internal", ["System"]),
-                    [typeof(CSharpStruct)] = new CSharpFile("Structs.gen.cs", "SharpImGui.Internal", ["System", "System.Numerics"]),
+                    //[typeof(CSharpStruct)] = new CSharpFile("Structs.gen.cs", "SharpImGui.Internal", ["System", "System.Numerics"]),
                     [typeof(CSharpDelegate)] = new CSharpFile("Delegates.gen.cs", "SharpImGui.Internal", ["System", "System.Runtime.InteropServices"]),
                     [typeof(CSharpMethod)] = new CSharpFile("ImGuiNative.gen.cs", "SharpImGui.Internal", ["System", "System.Runtime.InteropServices", "System.Numerics"]),
                     [typeof(CSharpConstant)] = new CSharpFile("Constants.gen.cs", "SharpImGui.Internal", ["System"])
@@ -62,6 +62,7 @@ namespace SharpImGui_Dev.CodeGenerator
         ];
         
         private CSharpContext _csharpContext = null!;
+        private GenerationConfig _currentConfig = null!;
         
         private readonly List<string> _skippedItems = [];
         private static readonly Dictionary<string, int> ArraySizes = new();
@@ -70,11 +71,13 @@ namespace SharpImGui_Dev.CodeGenerator
             ["IMGUI_DISABLE_OBSOLETE_FUNCTIONS"] = "",
             ["IMGUI_DISABLE_OBSOLETE_KEYIO"] = ""
         };
+        private readonly Dictionary<CSharpStruct, List<CSharpMethod>> _structMethods = new();
         
         public void Generate()
         {
             foreach (var config in _configs)
             {
+                _currentConfig = config;
                 CreateContext(config);
                 GenerateBindings(config.MetadataFile);
 
@@ -82,6 +85,8 @@ namespace SharpImGui_Dev.CodeGenerator
                     Directory.Delete(config.OutputPath, true);
                 _csharpContext.WriteAllFiles(config.OutputPath);
             }
+            _currentConfig = null!;
+            
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("Generated!");
             Console.ForegroundColor = ConsoleColor.Yellow;
@@ -145,6 +150,8 @@ namespace SharpImGui_Dev.CodeGenerator
             GenerateTypedefs(metadata.Typedefs);
             GenerateStructs(metadata.Structs);
             GenerateFunctions(metadata.Functions);
+            
+            GenerateStructsPtr();
         }
 
         private void GenerateConstants(IReadOnlyList<DefineItem> defines)
@@ -386,6 +393,10 @@ namespace SharpImGui_Dev.CodeGenerator
                     csharpStruct.Definitions.Add(csharpField);
                 }
                 
+                var structFile = new CSharpFile($"Structs/{csharpStruct.Name}.gen.cs", _currentConfig.Namespace, ["System", "System.Numerics", "System.Runtime.CompilerServices", "System.Text"]);
+                _csharpContext.AddFile(structFile);
+                structFile.Definitions.Add(csharpStruct);
+                csharpStruct.File = structFile;
                 _csharpContext.AddStruct(csharpStruct);
             }
         }
@@ -463,6 +474,13 @@ namespace SharpImGui_Dev.CodeGenerator
                         csharpMethod.Parameters.Add(new CSharpParameter(argumentName, csharpType));
                     }
                 }
+
+                var csharpStruct = _csharpContext.Structs.FirstOrDefault(s => s.Name == csharpMethod.Name.Split('_')[0], null);
+                if (csharpStruct is not null)
+                {
+                    _structMethods.TryAdd(csharpStruct, []);
+                    _structMethods[csharpStruct].Add(csharpMethod);
+                }
                 
                 _csharpContext.AddMethod(csharpMethod);
             }
@@ -509,6 +527,171 @@ namespace SharpImGui_Dev.CodeGenerator
             csharpDelegate.Modifiers.Add("delegate");
 
             return csharpDelegate;
+        }
+
+        private void GenerateStructsPtr()
+        {
+            foreach (var csharpStruct in _csharpContext.Structs)
+            {
+                if (csharpStruct.Name.StartsWith("ImVector", StringComparison.Ordinal))
+                    continue;
+                
+                var csharpStructPtr = new CSharpStruct(csharpStruct.Name + "Ptr");
+                csharpStructPtr.Modifiers.Add("public");
+                csharpStructPtr.Modifiers.Add("unsafe");
+                csharpStructPtr.Modifiers.Add("partial");
+
+                var structName = csharpStruct.Name;
+                var structNamePtr = structName + "Ptr";
+                
+                var code = CSharpCode.Begin();
+                code.WriteLine($"public {structName}* NativePtr {{ get; }}");
+                code.WriteLine($"public {structNamePtr}({structName}* nativePtr) => NativePtr = nativePtr;");
+                code.WriteLine($"public {structNamePtr}(IntPtr nativePtr) => NativePtr = ({structName}*)nativePtr;");
+                code.WriteLine($"public static implicit operator {structNamePtr}({structName}* nativePtr) => new {structNamePtr}(nativePtr);");
+                code.WriteLine($"public static implicit operator {structName}* ({structNamePtr} ptr) => ptr.NativePtr;");
+                code.WriteLine($"public static implicit operator {structNamePtr}(IntPtr nativePtr) => new {structNamePtr}(nativePtr);");
+
+                for (var i = 0; i < csharpStruct.Definitions.Count; i++)
+                {
+                    var definition = csharpStruct.Definitions[i];
+                    if (definition is not CSharpField field) continue;
+
+                    var typeString = field.Type.TypeName;
+                    if (typeString == "void")
+                    {
+                        code.WriteLine($"public IntPtr {field.Name} {{ get => (IntPtr)NativePtr->{field.Name}; set => NativePtr->{field.Name} = (void*)value; }}");
+                        continue;
+                    }
+
+                    if (field.Name.EndsWith("_0", StringComparison.Ordinal))
+                    {
+                        var currentLength = 0;
+                        while (csharpStruct.Definitions[i].Name.EndsWith($"_{currentLength}", StringComparison.Ordinal))
+                        {
+                            i++;
+                            currentLength++;
+                        }
+                        code.WriteLine($"public RangeAccessor<{typeString}> {field.Name[..^2]} => new RangeAccessor<{typeString}>(&NativePtr->{field.Name}, {currentLength});");
+                        continue;
+                    }
+
+                    if (typeString.StartsWith("ImVector", StringComparison.Ordinal))
+                    {
+                        var structType = _csharpContext.Structs.FirstOrDefault(s => s?.Name == typeString, null);
+                        if (structType is not null)
+                        {
+                            var dataFieldType =
+                                (CSharpField)structType.Definitions.First(d => d is CSharpField f && f.Name == "Data");
+                            if (_csharpContext.Structs.FirstOrDefault(s => s?.Name == dataFieldType.Type.TypeName, null)
+                                is not null)
+                            {
+                                typeString = dataFieldType.Type.TypeName + "Ptr";
+                                ((CSharpField)csharpStruct.Definitions[i]).Type = new CSharpType("ImVector");
+                                code.WriteLine(
+                                    $"public ImPtrVector<{typeString}> {field.Name} => new ImPtrVector<{typeString}>(NativePtr->{field.Name}, Unsafe.SizeOf<{dataFieldType.Type.TypeName}>());");
+                                continue;
+                            }
+
+                            typeString = dataFieldType.Type.TypeName;
+                        }
+                        else
+                        {
+                            typeString = typeString.Split('_')[^1];
+                        }
+
+                        ((CSharpField)csharpStruct.Definitions[i]).Type = new CSharpType("ImVector");
+                        code.WriteLine(
+                            $"public ImVector<{typeString}> {field.Name} => new ImVector<{typeString}>(NativePtr->{field.Name});");
+                    }
+                    else
+                    {
+                        if (field.Name == "__anonymous_type1")
+                        {
+                            //TODO handle anonymous types
+                            continue;
+                        }
+
+                        var typeString1 = typeString;
+                        if (field.Type.IsPointer && _csharpContext.Structs.FirstOrDefault(s => s?.Name == typeString1, null) is not null && !typeString.Contains("Ptr"))
+                        {
+                            code.WriteLine($"public {typeString1}Ptr {field.Name} => new {typeString1}Ptr(NativePtr->{field.Name});");
+                            continue;
+                        }
+                        code.WriteLine($"public ref {typeString} {field.Name} => ref Unsafe.AsRef<{typeString}>(&NativePtr->{field.Name});");
+                    }
+                }
+
+                csharpStructPtr.Definitions.Add(CSharpCode.End());
+                
+                if (_structMethods.TryGetValue(csharpStruct, out var methods))
+                {
+                    foreach (var method in methods)
+                    {
+                        var methodName = method.Name.Split('_')[^1];
+                        if (methodName.EndsWith("Ex"))
+                            methodName = methodName[..^2];
+
+                        // pass parameters names to camelCase
+                        var parameters = method.Parameters.Select(p => { p.Name = SnakeToCamelCase(p.Name); return p; }).ToList();
+                        var callerClass = _currentConfig.Namespace.Contains("Internal") ? "ImGuiInternalNative" : "ImGuiNative";
+                        var body = $"{(method.ReturnType is not { TypeName: "void", IsPointer: false } ? "return " : "")}{callerClass}.{method.Name}(";
+                        if (parameters[0].Type.TypeName == csharpStruct.Name)
+                        {
+                            parameters = parameters[1..];
+                            body += "NativePtr";
+                            if (parameters.Count > 0) body += ", ";
+                        }
+
+                        body += string.Join(", ", parameters.Select(p => p.Name));
+                        // foreach (var parameter in parameters) body = body + $", {parameter.Name}";
+                        body += ");";
+                        var csharpMethod = new CSharpMethod(methodName, method.ReturnType)
+                        {
+                            Modifiers = ["public"],
+                            Parameters = parameters,
+                            Body = body,
+                            Inline = false,
+                            TrailingComment = method.TrailingComment,
+                            PrecedingComments = method.PrecedingComments
+                        };
+                        csharpStructPtr.Definitions.Add(csharpMethod);
+                    }
+                }
+                
+                csharpStruct.File!.Definitions.Add(csharpStructPtr);
+                csharpStructPtr.File = csharpStruct.File;
+            }
+            
+            return;
+            
+            CSharpMethod CreateMethod(string name, (string name, bool isPointer) returnType, Dictionary<string, (string name, bool isPointer)> parameters, string body, bool inline = false, List<string>? modifiers = null)
+            {
+                var returnCsharpType = new CSharpType(returnType.name, returnType.isPointer);
+                var csharpMethod = new CSharpMethod(name, returnCsharpType);
+                csharpMethod.Body = body;
+                csharpMethod.Inline = inline;
+                if (modifiers is not null)
+                    csharpMethod.Modifiers.AddRange(modifiers);
+                
+                foreach (var (parameterName, (typeName, isPointer)) in parameters)
+                {
+                    var csharpType = new CSharpType(typeName, isPointer);
+                    var csharpParameter = new CSharpParameter(parameterName, csharpType);
+                    csharpMethod.Parameters.Add(csharpParameter);
+                }
+                
+                return csharpMethod;
+            }
+            
+            string SnakeToCamelCase(string str)
+            {
+                // return str.Split(["_"], StringSplitOptions.RemoveEmptyEntries).Select(s => char.ToUpperInvariant(s[0]) + s.Substring(1, s.Length - 1)).Aggregate(string.Empty, (s1, s2) => s1 + s2);
+                return str.Split(["_"], StringSplitOptions.RemoveEmptyEntries)
+                    .Select((s, i) => i == 0 ? s.ToLowerInvariant() : char.ToUpperInvariant(s[0]) + s[1..].ToLowerInvariant())
+                    .Aggregate(string.Empty, (s1, s2) => s1 + s2);
+
+            }
         }
 
         private void AttachComments(Comments? comments, CSharpDefinition definition)

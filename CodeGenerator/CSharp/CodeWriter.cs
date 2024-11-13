@@ -18,12 +18,24 @@ public class CodeWriter : IDisposable, IAsyncDisposable
 
     public CodeWriter(CSharpFile csharpFile, string outputPath)
     {
-        var dirInfo = new DirectoryInfo(outputPath);
-        if (!dirInfo.Exists)
-            dirInfo.Create();
-
+        // var dirInfo = new DirectoryInfo(outputPath);
+        // if (!dirInfo.Exists)
+        //     dirInfo.Create();
+        CheckAndCreateDirectory(outputPath, csharpFile.FileName);
         _writer = new StreamWriter(Path.Combine(outputPath, csharpFile.FileName + ".cs"));
         _csharpFile = csharpFile;
+    }
+
+    private void CheckAndCreateDirectory(string outputPath, string filePath)
+    {
+        if (filePath.Contains('/'))
+        {
+            var lastSlash = filePath.LastIndexOf('/');
+            var dirPath = filePath.Substring(0, lastSlash);
+            outputPath = Path.Combine(outputPath, dirPath);
+        }
+        if (!Directory.Exists(outputPath))
+            Directory.CreateDirectory(outputPath);
     }
     
     public void WriteFile()
@@ -60,6 +72,11 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         {
             WriteLine(line);
         }
+    }
+
+    private void WriteLines(string lines)
+    {
+        WriteLines(lines.Split('\n'));
     }
     
     private void StartLine()
@@ -117,6 +134,9 @@ public class CodeWriter : IDisposable, IAsyncDisposable
     {
         switch (definition)
         {
+            case CSharpCode csharpCode:
+                WriteCode(csharpCode);
+                break;
             case CSharpEnum csharpEnum:
                 WriteEnum(csharpEnum);
                 break;
@@ -184,6 +204,11 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         }
     }
 
+    private void WriteCode(CSharpCode code)
+    {
+        WriteLines(code.Code);
+    }
+
     private void WriteEnum(CSharpEnum csharpEnum)
     {
         if (!_isFirstDefinition)
@@ -238,6 +263,8 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         Write(csharpField.Type.TypeName);
         Write(csharpField.Type.IsPointer ? "* " : " ");
         Write(csharpField.Name);
+        if (csharpField.Initializer is not null)
+            Write($" {csharpField.Initializer}");
         Write(";");
         EndLine();
     }
@@ -276,8 +303,26 @@ public class CodeWriter : IDisposable, IAsyncDisposable
         Write(csharpMethod.ReturnType.IsPointer ? "* " : " ");
         Write(csharpMethod.Name);
         WriteParams(csharpMethod.Parameters);
-        Write(";");
-        EndLine();
+        if (csharpMethod.Body is not null)
+        {
+            if (csharpMethod.Inline)
+            {
+                Write($" => {csharpMethod.Body};");
+                EndLine();
+            }
+            else
+            {
+                EndLine();
+                PushBlock();
+                WriteLines(csharpMethod.Body);
+                PopBlock();
+            }
+        }
+        else
+        {
+            Write(";");
+            EndLine();
+        }
     }
 
     private void WriteDelegate(CSharpDelegate csharpDelegate)
