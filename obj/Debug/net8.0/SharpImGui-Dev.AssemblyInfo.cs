@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SharpImGui-Dev")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+898fca332487e35e4449c45ad679fb5e19209c75")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+fa18fd2c8f9bc35facffff2b4ae942c8aea83fad")]
 [assembly: System.Reflection.AssemblyProductAttribute("SharpImGui-Dev")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SharpImGui-Dev")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
