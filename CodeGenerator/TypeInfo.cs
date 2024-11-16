@@ -32,8 +32,8 @@ public static class TypeInfo
         { "ImTextureID", "IntPtr" },
         { "ImGuiID", "uint" },
         { "ImDrawIdx", "ushort" },
-        { "ImDrawListSharedData", "IntPtr" },
-        { "ImDrawListSharedData*", "IntPtr" },
+        // { "ImDrawListSharedData", "IntPtr" },
+        // { "ImDrawListSharedData*", "IntPtr" },
         { "ImDrawCallback", "IntPtr" },
         { "size_t", "uint" },
         { "ImGuiContext*", "IntPtr" },
@@ -130,10 +130,10 @@ public static class TypeInfo
 
     public static readonly Dictionary<string, string> CSharpIdentifiers = new()
     {
-        { "in", "@in" },
-        { "out", "@out" },
-        { "ref", "@ref" },
-        { "base", "@base" },
+        { "in", "_in" },
+        { "out", "_out" },
+        { "ref", "_ref" },
+        { "base", "_base" },
     };
 
     public static readonly HashSet<string> FixedTypes =
