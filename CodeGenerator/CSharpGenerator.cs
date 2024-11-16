@@ -4,6 +4,7 @@ using System.Data;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.AccessControl;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -13,10 +14,14 @@ public class CSharpGenerator
 {
     private static readonly string ProjectPath = Path.Combine("../../../");
     private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
+    
     private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
-    
     private string _namespace = "SharpImGui";
-    
+    private string _mainMethodsClass = "ImGui";
+    private string _nativeClass = "ImGuiNative";
+
+    private readonly HashSet<string> _pointerStructs = [];
+    private readonly Dictionary<string, List<(string name, string value)>> _enums = new();
     private readonly Dictionary<string, string> _foundedTypes = new();
     private readonly Dictionary<string, int> _arraySizes = new();
     private readonly Dictionary<string, (string? type, string value)> _knownDefines = new()
@@ -32,7 +37,22 @@ public class CSharpGenerator
         if (Directory.Exists(_outputPath))
             Directory.Delete(_outputPath, true);
         
+        _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
+        _namespace = "SharpImGui";
+        _mainMethodsClass = "ImGui";
+        _nativeClass = "ImGuiNative";
         GenerateBindings("dcimgui.json");
+        
+        _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated/Internal");
+        _namespace = "SharpImGui.Internal";
+        _mainMethodsClass = "ImGuiInternal";
+        _nativeClass = "ImGuiInternalNative";
+        // _foundedTypes.Clear();
+        // _arraySizes.Clear();
+        // _knownDefines.Clear();
+        _pointerStructs.Clear();
+        _delegates.Clear();
+        GenerateBindings("dcimgui_internal.json");
     }
 
     private void GenerateBindings(string metadataFile)
@@ -58,14 +78,6 @@ public class CSharpGenerator
 
     private void ProcessTypedefs(IReadOnlyList<TypedefItem> typedefs)
     {
-        // using var writer = new CSharpCodeWriter(_outputPath, "Typedefs.gen.cs");
-        //
-        // writer.Using("System");
-        // writer.WriteLine();
-        // writer.StartNamespace(_namespace);
-        // writer.WriteLine("public static class Typedefs");
-        // writer.PushBlock();
-
         foreach (var typedef in typedefs)
         {
             if (typedef.Type.Description.Kind == "Type")
@@ -90,9 +102,6 @@ public class CSharpGenerator
             var csharpType = GetCSharpType(typedef.Type.Description);
             _foundedTypes.TryAdd(typedef.Name, csharpType);
         }
-        
-        // writer.PopBlock();
-        // writer.EndNamespace();
     }
 
     private void GenerateConstants(IReadOnlyList<DefineItem> defines)
@@ -200,15 +209,45 @@ public class CSharpGenerator
             if (!EvalConditionals(@enum.Conditionals))
                 continue;
             
-            var enumName = CleanupEnumName(@enum.Name);
-            _foundedTypes.Add(enumName, enumName);
+            var enumName = @enum.Name;
+            var enumNameCleaned = CleanupEnumName(enumName);
+
+            var isExtenssion = false;
+            var extendedElements = new List<(string name, string value)>();
+            
+            if (enumName.EndsWith("Private_"))
+            {
+                enumName = enumName.Replace("Private", "");
+                enumNameCleaned = enumNameCleaned.Replace("Private", "");
+
+                if (_enums.TryGetValue(enumNameCleaned, out var elements))
+                {
+                    isExtenssion = true;
+                    extendedElements = elements;
+                }
+            }
+            _foundedTypes.TryAdd(enumNameCleaned, enumNameCleaned);
+            
+            if (!isExtenssion)
+                _enums.Add(enumNameCleaned, []);
             
             writer.WriteCommentary(CleanupComments(@enum.Comments));
             if (@enum.IsFlagsEnum)
                 writer.WriteLine("[Flags]");
 
-            writer.WriteLine($"public enum {enumName}");
+            writer.WriteLine($"public enum {enumNameCleaned}");
             writer.PushBlock();
+
+            if (isExtenssion)
+            {
+                writer.WriteLine($"// {enumNameCleaned} values\n");
+                foreach (var element in extendedElements)
+                {
+                    writer.WriteLine($"{element.name} = {element.value},");
+                }
+                writer.WriteLine();
+                writer.WriteLine($"// Extended {enumNameCleaned} values\n");
+            }
             
             foreach (var element in @enum.Elements)
             {
@@ -223,10 +262,13 @@ public class CSharpGenerator
                 
                 var value = element.Value.ToString(CultureInfo.InvariantCulture);
                 if (element.ValueExpression != null)
-                    value = CleanupEnumElement(element.ValueExpression, @enum.Name);
+                    value = CleanupEnumElement(element.ValueExpression, enumName);
                 
                 writer.WriteCommentary(CleanupComments(element.Comments));
-                writer.WriteLine($"{CleanupEnumElement(element.Name, @enum.Name)} = {value},");
+                var cleanedName = CleanupEnumElement(element.Name, enumName);
+                writer.WriteLine($"{cleanedName} = {value},");
+                
+                _enums[enumNameCleaned].Add((cleanedName, value));
             }
             
             writer.PopBlock();
@@ -266,10 +308,10 @@ public class CSharpGenerator
             
             if (@struct.Fields.Count == 0)
             {
-                _foundedTypes.Add(structName, "IntPtr");
+                // _foundedTypes.TryAdd(structName, "IntPtr");
+                _pointerStructs.Add(structName);
                 continue;
             }
-            
             
             if (structName.Contains('_'))
                 structName = structName.Split('_')[^1];
@@ -294,15 +336,12 @@ public class CSharpGenerator
                 if (!EvalConditionals(field.Conditionals))
                     continue;
                 
+                if (field.Name.Contains("__anonymous_type"))
+                    continue;
+                
                 var fieldType = GetCSharpType(field.Type.Description);
-                if (fieldType.Contains("ImVector"))
-                {
-                    if (fieldType.Contains('*'))
-                        throw new NotSupportedException($"ImVector pointer not supported {fieldType}");
-                    
-                    fieldType = "ImVector";
-                }
 
+                
                 writer.WriteCommentary(CleanupComments(field.Comments));
                 var nativeType = field.Type.Description;
                 
@@ -334,6 +373,11 @@ public class CSharpGenerator
                     }
                     
                     fieldType = GetCSharpType(field.Type.Description.InnerType!);
+                    
+                    if (fieldType.Contains("ImVector"))
+                    {
+                        fieldType = "ImVector";
+                    }
                     
                     if (TypeInfo.FixedTypes.Contains(fieldType))
                     {
@@ -372,6 +416,11 @@ public class CSharpGenerator
                 }
                 else
                 {
+                    if (fieldType.Contains("ImVector"))
+                    {
+                        fieldType = "ImVector";
+                    }
+                    
                     writer.WriteLine($"public {fieldType} {field.Name};");
                 }
             }
@@ -395,11 +444,18 @@ public class CSharpGenerator
                 if (!EvalConditionals(field.Conditionals))
                     continue;
                 
+                if (field.Name.Contains("__anonymous_type"))
+                    continue;
+                
                 writer.WriteLine();
                 
                 var fieldType = GetCSharpType(field.Type.Description);
 
                 writer.WriteCommentary(CleanupComments(field.Comments));
+                if (structName == "ImDrawData" && field.Name == "CmdLists")
+                {
+                        
+                }
 
                 if (field.IsArray)
                 {
@@ -417,8 +473,45 @@ public class CSharpGenerator
                             }
                         }
                     }
+
+                    if (fieldType.Contains("ImVector"))
+                    {
+                        fieldType = fieldType.Split('_')[^1];
+
+                        if (TypeInfo.ConversionTypes.TryGetValue(fieldType, out var conversionType))
+                        {
+                            fieldType = conversionType;
+                        }
+
+                        if (GetWrappedType($"{fieldType}*", out var wrappedType))
+                        {
+                            fieldType = $"ImPtrVector<{wrappedType}>";
+                        }
+                        else
+                        {
+                            if (GetWrappedType(fieldType, out wrappedType))
+                            {
+                                fieldType = wrappedType;
+                            }
+
+                            if (fieldType.EndsWith('*'))
+                            {
+                                fieldType = fieldType[..^1];
+                                fieldType = $"ImPtrVector<{fieldType}>";
+                            }
+                            else
+                            {
+                                fieldType = $"ImVector<{fieldType}>";
+                            }
+                        }
+                    }
+
                     
                     string addressType = TypeInfo.FixedTypes.Contains(fieldType) ? $"NativePtr->{field.Name}" : $"&NativePtr->{field.Name}_{0}";
+                    if (fieldType.EndsWith('*'))
+                    {
+                        fieldType = fieldType[..^1];
+                    }
                     writer.WriteLine($"public RangeAccessor<{fieldType}> {field.Name} => new RangeAccessor<{fieldType}>({addressType}, {arraySize});");
                 }
                 else if (fieldType.Contains("ImVector"))
@@ -430,7 +523,7 @@ public class CSharpGenerator
                         elementType = conversionType;
                     }
 
-                    if (GetWrappedType($"elementType*", out var wrappedType))
+                    if (GetWrappedType($"{elementType}*", out var wrappedType))
                     {
                         writer.WriteLine($"public ImPtrVector<{wrappedType}> {field.Name} => new ImPtrVector<{wrappedType}>(NativePtr->{field.Name}, Unsafe.SizeOf<{elementType}>());");
                     }
@@ -469,7 +562,11 @@ public class CSharpGenerator
 
             foreach (var function in definitions.Functions)
             {
-                if (function.Name.Split('_')[^2] != structName)
+                var nameSplit = function.Name.Split('_');
+                if (nameSplit.Length == 0 ||
+                    nameSplit.Length == 1 ||
+                    nameSplit.Length == 2 && nameSplit[0] != structName ||
+                    nameSplit.Length >= 3 && nameSplit[^2] != structName)
                 {
                     continue;
                 }
@@ -481,64 +578,7 @@ public class CSharpGenerator
                     continue;
                 
                 writer.WriteLine();
-                
-                // var functionName = function.Name.Split('_')[^1];
-                //
-                // var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
-                // var parameters = new List<(string type, string name)>();
-                // foreach (var argument in function.Arguments)
-                // {
-                //     var argumentName = argument.Name;
-                //
-                //     if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
-                //         argumentName = csharpIdentifier;
-                //
-                //     if (argument.Type is null)
-                //         continue;
-                //     
-                //     var argumentTypeDesc = argument.Type.Description;
-                //
-                //     if (argumentTypeDesc.Kind == "Array")
-                //     {
-                //         var paramType = GetCSharpType(argumentTypeDesc.InnerType!);
-                //         parameters.Add((paramType + "*", argumentName));
-                //     }
-                //     else
-                //     {
-                //         var csharpType = GetCSharpType(argumentTypeDesc);
-                //         //if type is ImVector_ImWchar* or ImVector_ImGuiTextFilter_ImGuiTextRange*, etc... will be converted to ImVector*
-                //         if (csharpType.Contains("ImVector_") && csharpType.EndsWith('*'))
-                //         {
-                //             csharpType = "ImVector*";
-                //         }
-                //         else if (csharpType.Contains('*') && !csharpType.Contains("ImVector"))
-                //         {
-                //             if (GetWrappedType(csharpType, out var wrappedType))
-                //             {
-                //                 csharpType = wrappedType;
-                //             }
-                //         }
-                //         
-                //         parameters.Add((csharpType, argumentName));
-                //     }
-                // }
-                //
-                // writer.WriteCommentary(CleanupComments(function.Comments));
-                //
-                // var typedParameters = "";
-                // if (parameters[0].type == $"{ptrStructName}")
-                // {
-                //     parameters = parameters[1..];
-                //     typedParameters += "NativePtr";
-                //     if (parameters.Count > 0) typedParameters += ", ";
-                // }
-                // typedParameters += string.Join(", ", parameters.Select(p => p.name));
-                //
-                // writer.WriteLine($"public {csharpReturnType} {functionName}({string.Join(", ", parameters.Select(p => p.type + " " + p.name))})");
-                // writer.PushBlock();
-                // writer.WriteLine($"{(csharpReturnType == "void" ? "" : "return ")}ImGuiNative.{function.Name}({typedParameters});");
-                // writer.PopBlock();
-                WriteMethodOverload(function, writer);
+                WriteMethodOverload(function, writer, structName);
             }
             
             writer.PopBlock();
@@ -549,13 +589,13 @@ public class CSharpGenerator
 
     private void GenerateMethods(IReadOnlyList<FunctionItem> functions)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, "ImGuiNative.gen.cs");
+        using var writer = new CSharpCodeWriter(_outputPath, $"{_nativeClass}.gen.cs");
 
         writer.Using("System");
         writer.Using("System.Numerics");
         writer.Using("System.Runtime.InteropServices");
         writer.StartNamespace(_namespace);
-        writer.WriteLine("public static unsafe partial class ImGuiNative");
+        writer.WriteLine($"public static unsafe partial class {_nativeClass}");
         writer.PushBlock();
 
         foreach (var function in functions)
@@ -572,6 +612,7 @@ public class CSharpGenerator
             
             var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
             var parameters = new List<string>();
+            
             foreach (var argument in function.Arguments)
             {
                 var argumentName = argument.Name;
@@ -660,6 +701,10 @@ public class CSharpGenerator
         foreach (var parameter in description.Parameters!)
         {
             var argumentName = parameter.Name!;
+            if (string.IsNullOrEmpty(argumentName))
+            {
+                argumentName = "arg" + description.Parameters.IndexOf(parameter);
+            }
             var argumentType = parameter;
             if (parameter.Kind == "Type")
             {
@@ -680,13 +725,16 @@ public class CSharpGenerator
 
     private void GenerateMainOverloads(IReadOnlyList<FunctionItem> functions)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, "ImGui.gen.cs");
+        using var writer = new CSharpCodeWriter(_outputPath, $"{_mainMethodsClass}.gen.cs");
 
         writer.Using("System");
         writer.Using("System.Numerics");
         writer.Using("System.Runtime.InteropServices");
+        writer.Using("System.Text");
+        writer.WriteLine("// ReSharper disable InconsistentNaming");
+        writer.WriteLine();
         writer.StartNamespace(_namespace);
-        writer.WriteLine("public static unsafe partial class ImGui");
+        writer.WriteLine($"public static unsafe partial class {_mainMethodsClass}");
         writer.PushBlock();
 
         foreach (var function in functions.Where(f => f.Name.StartsWith("ImGui_")))
@@ -699,67 +747,227 @@ public class CSharpGenerator
 
             writer.WriteLine();
                 
-            WriteMethodOverload(function, writer, true);
+            WriteMethodOverload(function, writer, null, true);
         }
         
         writer.PopBlock();
         writer.EndNamespace();
     }
 
-    private void WriteMethodOverload(FunctionItem function, CSharpCodeWriter writer, bool isStatic = false)
+    private void WriteMethodOverload(FunctionItem function, CSharpCodeWriter writer, string? structName, bool isStatic = false)
     {
         var functionName = function.Name.Split('_')[^1];
             
+        var returnCode = "ret";
         var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
         var isWrappedType = GetWrappedType(csharpReturnType, out var safeReturnType);
         if (!isWrappedType)
             safeReturnType = csharpReturnType;
+
+        if (csharpReturnType != "void")
+        {
+            if (function.ReturnType!.Description.BuiltinType == "bool")
+            {
+                returnCode = $"ret != 0";
+                safeReturnType = "bool";
+            }
+        }
             
-        var parameters = new List<(string type, string name)>();
-            
-        bool hasSelf = false;
+        var managedParameters = new List<(string type, string name)>();
+        var nativeParameters = new List<string>();
+        var beforeCall = new List<Action>();
+        var afterCall = new List<Action>();
+        var fixedBlocks = new List<Action>();
+
+        // var hasSelf = false;
         foreach (var argument in function.Arguments)
         {
+            if (argument.Type is null)
+                continue;
+            
             var argumentName = argument.Name;
-                
+            var argumentTypeDesc = argument.Type.Description;
+            
             if (argumentName == "self")
             {
-                hasSelf = true;
+                // hasSelf = true;
+                nativeParameters.Add("NativePtr");
                 continue;
             }
             
             if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
                 argumentName = csharpIdentifier;
             
-            if (argument.Type is null)
-                continue;
-                
-            var argumentTypeDesc = argument.Type.Description;
-            
+            // Arrays
             if (argumentTypeDesc.Kind == "Array")
             {
                 var paramType = GetCSharpType(argumentTypeDesc.InnerType!);
-                parameters.Add((paramType + "*", argumentName));
-            }
-            else if (argumentTypeDesc.Kind == "Type")
-            {
-                // this is most possibly a delegate
-                var innerType = argumentTypeDesc.InnerType!;
-            
-                if (innerType.Kind == "Pointer" && innerType.InnerType!.Kind == "Function")
+                
+                // managedParameters.Add((paramType + "*", argumentName));
+                // nativeParameters.Add(argumentName);
+                
+                if (argumentTypeDesc.InnerType!.Kind == "Pointer")
                 {
-                    var delegateName = function.Name + argumentName + "Delegate";
-                    parameters.Add((delegateName, argumentName));
+                    // String
+                    if (argumentTypeDesc.InnerType!.InnerType!.BuiltinType == "char")
+                    {
+                        paramType = "string";
+                        beforeCall.Add(() =>
+                        {
+                            writer.WriteLine($"// Marshaling '{argumentName}' to native string array");
+                            var nativeName = $"native_{argumentName}";
+                            writer.WriteLine($"var {argumentName}_byteCounts = stackalloc int[{argumentName}.Length];");
+                            writer.WriteLine($"var {argumentName}_byteCount = 0;");
+                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                            writer.PushBlock();
+                            writer.WriteLine($"{argumentName}_byteCounts[i] = Encoding.UTF8.GetByteCount({argumentName}[i]);");
+                            writer.WriteLine($"{argumentName}_byteCount += {argumentName}_byteCounts[i] + 1;");
+                            writer.PopBlock();
+                            
+                            writer.WriteLine($"var {nativeName}_data = stackalloc byte[{argumentName}_byteCount];");
+                            writer.WriteLine($"var {argumentName}_offset = 0;");
+                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                            writer.PushBlock();
+                            writer.WriteLine($"var s = {argumentName}[i];");
+                            writer.WriteLine($"{argumentName}_offset += Util.GetUtf8(s, {nativeName}_data + {argumentName}_offset, {argumentName}_byteCounts[i]);");
+                            writer.WriteLine($"{nativeName}_data[{argumentName}_offset++] = 0;");
+                            writer.PopBlock();
+                            
+                            writer.WriteLine($"var {nativeName} = stackalloc byte*[{argumentName}.Length];");
+                            writer.WriteLine($"{argumentName}_offset = 0;");
+                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                            writer.PushBlock();
+                            writer.WriteLine($"{nativeName}[i] = &{nativeName}_data[{argumentName}_offset];");
+                            writer.WriteLine($"{argumentName}_offset += {argumentName}_byteCounts[i] + 1;");
+                            writer.PopBlock();
+                        });
+                    }
+                    else
+                    {
+                        throw new NotImplementedException();
+                    }
                 }
                 else
                 {
-                    Console.WriteLine($"Unknown Type argument {argumentTypeDesc.Name}");
+                    beforeCall.Add(() =>
+                    {
+                        writer.WriteLine($"// Marshaling '{argumentName}' to native {paramType} array");
+                        writer.WriteLine($"var native_{argumentName} = stackalloc {paramType}[{argumentName}.Length];");
+                        writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                        writer.PushBlock();
+                        writer.WriteLine($"native_{argumentName}[i] = {argumentName}[i];");
+                        writer.PopBlock();
+                    });
                 }
+                
+                managedParameters.Add(($"{paramType}[]", argumentName));
+                nativeParameters.Add($"native_{argumentName}");
+                continue;
             }
+            // Delegates
+            else if (argumentTypeDesc.Kind == "Type")
+            {
+                var delegateName = function.Name + argumentName + "Delegate";
+                managedParameters.Add((delegateName, argumentName));
+                nativeParameters.Add(argumentName);
+            }
+            // Other types
             else
             {
+                if (argumentTypeDesc.Kind == "Pointer")
+                {
+                    // String
+                    if (argumentTypeDesc.InnerType!.BuiltinType == "char")
+                    {
+                        managedParameters.Add(("ReadOnlySpan<char>", argumentName));
+                        nativeParameters.Add($"native_{argumentName}");
+                        beforeCall.Add(() =>
+                        {
+                            writer.WriteLine($"// Marshaling '{argumentName}' to native string");
+                            var nativeName = $"native_{argumentName}";
+                            writer.WriteLine($"byte* {nativeName};");
+                            writer.WriteLine($"var {argumentName}_byteCount = 0;");
+                            writer.WriteLine($"if ({argumentName} != null)");
+                            writer.PushBlock();
+                            writer.WriteLine($"{argumentName}_byteCount = Encoding.UTF8.GetByteCount({argumentName});");
+                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
+                            writer.PushBlock();
+                            writer.WriteLine($"{nativeName} = Util.Allocate({argumentName}_byteCount + 1);");
+                            writer.PopBlock();
+                            writer.WriteLine("else");
+                            writer.PushBlock();
+                            writer.WriteLine($"var {nativeName}_stackBytes = stackalloc byte[{argumentName}_byteCount + 1];");
+                            writer.WriteLine($"{nativeName} = {nativeName}_stackBytes;");
+                            writer.PopBlock();
+                            writer.WriteLine($"var {argumentName}_offset = Util.GetUtf8({argumentName}, {nativeName}, {argumentName}_byteCount);");
+                            writer.WriteLine($"{nativeName}[{argumentName}_offset] = 0;");
+                            writer.PopBlock();
+                            writer.WriteLine($"else {nativeName} = null;");
+                        });
+                        afterCall.Add(() =>
+                        {
+                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
+                            writer.PushBlock();
+                            writer.WriteLine($"Util.Free(native_{argumentName});");
+                            writer.PopBlock();
+                        });
+                        continue;
+                    }
+                    // Ref Bool
+                    else if (argumentTypeDesc.InnerType!.BuiltinType == "bool")
+                    {
+                        managedParameters.Add(("ref bool", argumentName));
+                        nativeParameters.Add($"native_{argumentName}");
+                        beforeCall.Add(() =>
+                        {
+                            writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
+                            writer.WriteLine($"var native_{argumentName}_val = {argumentName} ? (byte)1 : (byte)0;");
+                            writer.WriteLine($"var native_{argumentName} = &native_{argumentName}_val;");
+                        });
+                        afterCall.Add(() =>
+                        {
+                            writer.WriteLine($"{argumentName} = native_{argumentName}_val != 0;");
+                        });
+                        continue;
+                    }
+                    // Ref T
+                    else if (argumentTypeDesc.InnerType!.Kind == "Builtin")
+                    {
+                        if (argumentTypeDesc.InnerType.BuiltinType == "void")
+                        {
+                            managedParameters.Add(("IntPtr", argumentName));
+                            nativeParameters.Add($"native_{argumentName}");
+                            beforeCall.Add(() =>
+                            {
+                                writer.WriteLine($"var native_{argumentName} = {argumentName}.ToPointer();");
+                            });
+                            continue;
+                        }
+                        var argumentType = GetCSharpType(argumentTypeDesc.InnerType!);
+                        managedParameters.Add(($"ref {argumentType}", argumentName));
+                        nativeParameters.Add($"native_{argumentName}");
+                        fixedBlocks.Add(() =>
+                        {
+                            writer.WriteLine($"fixed ({argumentType}* native_{argumentName} = &{argumentName})");
+                        });
+                        continue;
+                    }
+                }
+                else
+                {
+                    if (argumentTypeDesc.BuiltinType == "bool")
+                    {
+                        managedParameters.Add(("bool", argumentName));
+                        nativeParameters.Add($"native_{argumentName}");
+                        beforeCall.Add(() =>
+                        {
+                            writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
+                            writer.WriteLine($"var native_{argumentName} = {argumentName} ? (byte)1 : (byte)0;");
+                        });
+                        continue;
+                    }
+                }
                 var csharpType = GetCSharpType(argumentTypeDesc);
-                //if type is ImVector_ImWchar* or ImVector_ImGuiTextFilter_ImGuiTextRange*, etc... will be converted to ImVector*
                 if (csharpType.Contains("ImVector_") && csharpType.EndsWith('*'))
                 {
                     csharpType = "ImVector*";
@@ -772,23 +980,40 @@ public class CSharpGenerator
                     }
                 }
                     
-                parameters.Add((csharpType, argumentName));
+                managedParameters.Add((csharpType, argumentName));
+                nativeParameters.Add(argumentName);
             }
         }
             
         writer.WriteCommentary(CleanupComments(function.Comments));
 
-        var typedParameters = "";
-        if (hasSelf)
-        {
-            typedParameters += "NativePtr";
-            if (parameters.Count > 0) typedParameters += ", ";
-        }
-        typedParameters += string.Join(", ", parameters.Select(p => p.name));
-            
-        writer.WriteLine($"public{(isStatic ? " static" : "")} {safeReturnType} {functionName}({string.Join(", ", parameters.Select(p => p.type + " " + p.name))})");
+        writer.WriteLine($"public{(isStatic ? " static" : "")} {safeReturnType} {functionName}({string.Join(", ", managedParameters.Select(p => p.type + " " + p.name))})");
         writer.PushBlock();
-        writer.WriteLine($"{(safeReturnType == "void" ? "" : "return ")}ImGuiNative.{function.Name}({typedParameters});");
+
+        foreach (var action in beforeCall)
+        {
+            action();
+            writer.WriteLine();
+        }
+        
+        if (fixedBlocks.Count > 0)
+        {
+            foreach (var action in fixedBlocks)
+                action();
+            writer.PushBlock();
+        }
+        
+        writer.WriteLine($"{(safeReturnType == "void" ? "" : $"var ret = ")}{_nativeClass}.{function.Name}({string.Join(", ", nativeParameters)});");
+
+        foreach (var action in afterCall)
+            action();
+        
+        if (csharpReturnType!= "void")
+            writer.WriteLine($"return {returnCode};");
+
+        if (fixedBlocks.Count > 0)
+            writer.PopBlock();
+        
         writer.PopBlock();
     }
 
@@ -811,6 +1036,8 @@ public class CSharpGenerator
                 // try to find the conversion, or fallback to whats actually declared
                 if (TypeInfo.ConversionTypes.TryGetValue(type, out var  conversionType))
                     return conversionType;
+                if (_pointerStructs.Contains(type))
+                    return "IntPtr";
                 
                 return _foundedTypes.GetValueOrDefault(type, type);
             }
@@ -842,9 +1069,9 @@ public class CSharpGenerator
         return unknown;
     }
     
-    private static bool GetWrappedType(string nativeType, out string wrappedType)
+    private bool GetWrappedType(string nativeType, out string wrappedType)
     {
-        if (nativeType.StartsWith("Im") && nativeType.EndsWith("*") && !nativeType.StartsWith("ImVector"))
+        if (nativeType.StartsWith("Im") && nativeType.EndsWith("*") && !nativeType.StartsWith("ImVector") && !_enums.ContainsKey(nativeType[..^1]))
         {
             int pointerLevel = nativeType.Length - nativeType.IndexOf('*');
             if (pointerLevel > 1)
@@ -852,9 +1079,15 @@ public class CSharpGenerator
                 wrappedType = null;
                 return false; // TODO
             }
-            string nonPtrType = nativeType.Substring(0, nativeType.Length - pointerLevel);
+            string nonPtrType = nativeType[..^pointerLevel];
 
             if (TypeInfo.ConversionTypes.ContainsKey(nonPtrType))
+            {
+                wrappedType = null;
+                return false;
+            }
+
+            if (nonPtrType.EndsWith("Ptr"))
             {
                 wrappedType = null;
                 return false;
