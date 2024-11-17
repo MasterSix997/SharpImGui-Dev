@@ -289,6 +289,17 @@ public class CSharpGenerator
         string CleanupEnumElement(string name, string enumName)
         {
             name = name.Replace(enumName, "");
+            if (name.StartsWith('_') && name.Length > 1 && !char.IsDigit(name[1]))
+                name = name[1..];
+            
+            var minusSplit = name.Split('-');
+            for (int i = 0; i < minusSplit.Length; i++)
+            {
+                if (minusSplit[i].StartsWith('_') && minusSplit[i].Length > 1 && !char.IsDigit(minusSplit[i][1]))
+                    minusSplit[i] = minusSplit[i][1..];
+            }
+            name = string.Join("-", minusSplit);
+
             return name;
         }
     }
@@ -759,6 +770,10 @@ public class CSharpGenerator
     private void WriteMethodOverload(FunctionItem function, CSharpCodeWriter writer, string? structName, bool isStatic = false)
     {
         var functionName = function.Name.Split('_')[^1];
+        if (functionName.EndsWith("Ex"))
+        {
+            return;
+        }
         
         WriteMethod(functionName, GetReturnType(), GetParameters());
         
@@ -813,6 +828,14 @@ public class CSharpGenerator
                 
                 if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
                     argumentName = csharpIdentifier;
+                // Generate Overloads with Default Values
+                if (argument.DefaultValue != null)
+                {
+                    var startIndex = function.Arguments.IndexOf(argument);
+                    GenerateOverload(function.Arguments[new Range(startIndex, function.Arguments.Count)], 
+                        new MethodParameters([..managedParameters], [..nativeParameters], [..beforeCall], [..afterCall], [..fixedBlocks]));
+                }
+
                 
                 // Arrays
                 if (argumentTypeDesc.Kind == "Array")
@@ -1017,10 +1040,72 @@ public class CSharpGenerator
             return new MethodParameters(managedParameters, nativeParameters, beforeCall, afterCall, fixedBlocks);
         }
 
-        void WriteMethod(string functionName, (string safeReturnType, string returnCode) methodReturn, MethodParameters parameters)
+        void GenerateOverload(IReadOnlyList<FunctionArgument> arguments, MethodParameters parameters)
+        {
+            foreach (var argument in arguments)
+            {
+                var argumentName = argument.Name;
+                if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
+                    argumentName = csharpIdentifier;
+                
+                var argumentTypeDesc = argument.Type!.Description;
+                var argumentType = GetCSharpType(argumentTypeDesc);
+                
+                var defaultValue = TypeInfo.DefaultValues!.GetValueOrDefault(argument.DefaultValue, argument.DefaultValue)!;
+
+                if (defaultValue == "false")
+                    defaultValue = "0";
+                else if (defaultValue == "true")
+                    defaultValue = "1";
+                
+                if (argumentTypeDesc.Kind == "Pointer" && defaultValue != "null")
+                {
+                    // String
+                    if (argumentTypeDesc.InnerType!.BuiltinType == "char")
+                    {
+                        parameters.NativeParameters.Add(argumentName);
+                        var stringValue = defaultValue;
+                        parameters.BeforeCall.Add(() =>
+                        {
+                            writer.WriteLine($"{argumentType} {argumentName};");
+                            writer.WriteLine($"var {argumentName}_byteCount = Encoding.UTF8.GetByteCount({stringValue});");
+                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
+                            writer.WriteLine($"\t{argumentName} = Util.Allocate({argumentName}_byteCount + 1);");
+                            writer.WriteLine("else");
+                            writer.PushBlock();
+                            writer.WriteLine($"var {argumentName}_stackBytes = stackalloc byte[{argumentName}_byteCount + 1];");
+                            writer.WriteLine($"{argumentName} = {argumentName}_stackBytes;");
+                            writer.PopBlock();
+                            writer.WriteLine($"var {argumentName}_offset = Util.GetUtf8({stringValue}, {argumentName}, {argumentName}_byteCount);");
+                            writer.WriteLine($"{argumentName}[{argumentName}_offset] = 0;");
+                        });
+                        parameters.AfterCall.Add(() =>
+                        {
+                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
+                            writer.WriteLine($"\tUtil.Free({argumentName});");
+                        });
+                        continue;
+                    }
+                }
+                
+                if (argumentType == "IntPtr")
+                    defaultValue = "IntPtr.Zero";
+                else if (_enums.ContainsKey(argumentType))
+                    defaultValue = $"({argumentType}){defaultValue}";
+                
+                parameters.NativeParameters.Add(argumentName);
+                parameters.BeforeCall.Add(() =>
+                {
+                    writer.WriteLine($"{argumentType} {argumentName} = {defaultValue};");
+                });
+            }
+
+            WriteMethod(functionName, GetReturnType(), parameters);
+        }
+
+        void WriteMethod(string functionName, (string safeReturnType, string returnCode) methodReturn, MethodParameters parameters, string? functionCall = null)
         {
             writer.WriteCommentary(CleanupComments(function.Comments));
-
             writer.WriteLine($"public{(isStatic ? " static" : "")} {methodReturn.safeReturnType} {functionName}({string.Join(", ", parameters.ManagedParameters.Select(p => p.type + " " + p.name))})");
             writer.PushBlock();
 
@@ -1036,8 +1121,10 @@ public class CSharpGenerator
                     action();
                 writer.PushBlock();
             }
-        
-            writer.WriteLine($"{(methodReturn.safeReturnType == "void" ? "" : $"var ret = ")}{_nativeClass}.{function.Name}({string.Join(", ", parameters.NativeParameters)});");
+
+            functionCall ??= $"{_nativeClass}.{function.Name}";
+            
+            writer.WriteLine($"{(methodReturn.safeReturnType == "void" ? "" : $"var ret = ")}{functionCall}({string.Join(", ", parameters.NativeParameters)});");
 
             foreach (var action in parameters.AfterCall)
                 action();
