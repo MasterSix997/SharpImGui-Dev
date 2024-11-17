@@ -753,268 +753,303 @@ public class CSharpGenerator
         writer.PopBlock();
         writer.EndNamespace();
     }
+    
+    private record MethodParameters(List<(string type, string name)> ManagedParameters, List<string> NativeParameters, List<Action> BeforeCall, List<Action> AfterCall, List<Action> FixedBlocks);
 
     private void WriteMethodOverload(FunctionItem function, CSharpCodeWriter writer, string? structName, bool isStatic = false)
     {
         var functionName = function.Name.Split('_')[^1];
-            
-        var returnCode = "ret";
-        var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
-        var isWrappedType = GetWrappedType(csharpReturnType, out var safeReturnType);
-        if (!isWrappedType)
-            safeReturnType = csharpReturnType;
+        
+        WriteMethod(functionName, GetReturnType(), GetParameters());
+        
+        return;
 
-        if (csharpReturnType != "void")
+        (string safeReturnType, string returnCode) GetReturnType()
         {
-            if (function.ReturnType!.Description.BuiltinType == "bool")
-            {
-                returnCode = $"ret != 0";
-                safeReturnType = "bool";
-            }
-        }
-            
-        var managedParameters = new List<(string type, string name)>();
-        var nativeParameters = new List<string>();
-        var beforeCall = new List<Action>();
-        var afterCall = new List<Action>();
-        var fixedBlocks = new List<Action>();
+            var returnCode = "ret";
+            var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
+            var isWrappedType = GetWrappedType(csharpReturnType, out var safeReturnType);
+            if (!isWrappedType)
+                safeReturnType = csharpReturnType;
 
-        // var hasSelf = false;
-        foreach (var argument in function.Arguments)
-        {
-            if (argument.Type is null)
-                continue;
-            
-            var argumentName = argument.Name;
-            var argumentTypeDesc = argument.Type.Description;
-            
-            if (argumentName == "self")
+            if (csharpReturnType != "void")
             {
-                // hasSelf = true;
-                nativeParameters.Add("NativePtr");
-                continue;
-            }
-            
-            if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
-                argumentName = csharpIdentifier;
-            
-            // Arrays
-            if (argumentTypeDesc.Kind == "Array")
-            {
-                var paramType = GetCSharpType(argumentTypeDesc.InnerType!);
-                
-                // managedParameters.Add((paramType + "*", argumentName));
-                // nativeParameters.Add(argumentName);
-                
-                if (argumentTypeDesc.InnerType!.Kind == "Pointer")
+                if (function.ReturnType!.Description.BuiltinType == "bool")
                 {
-                    // String
-                    if (argumentTypeDesc.InnerType!.InnerType!.BuiltinType == "char")
+                    returnCode = $"ret != 0";
+                    safeReturnType = "bool";
+                }
+            }
+
+            return (safeReturnType, returnCode);
+        }
+
+        MethodParameters GetParameters()
+        {
+            var managedParameters = new List<(string type, string name)>();
+            var nativeParameters = new List<string>();
+            var beforeCall = new List<Action>();
+            var afterCall = new List<Action>();
+            var fixedBlocks = new List<Action>();
+            
+            foreach (var argument in function.Arguments)
+            {
+                if (argument.Type is null)
+                    continue;
+
+                // if (argument.DefaultValue is not null)
+                // {
+                    //TODO)) gerenate another overload without this argument, and call this function with default value instead of argument
+                // }
+                
+                var argumentName = argument.Name;
+                var argumentTypeDesc = argument.Type.Description;
+                
+                if (argumentName == "self")
+                {
+                    nativeParameters.Add("NativePtr");
+                    continue;
+                }
+                
+                if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
+                    argumentName = csharpIdentifier;
+                
+                // Arrays
+                if (argumentTypeDesc.Kind == "Array")
+                {
+                    var paramType = GetCSharpType(argumentTypeDesc.InnerType!);
+                    
+                    if (argumentTypeDesc.InnerType!.Kind == "Pointer")
                     {
-                        paramType = "string";
-                        beforeCall.Add(() =>
+                        // String
+                        if (argumentTypeDesc.InnerType!.InnerType!.BuiltinType == "char")
                         {
-                            writer.WriteLine($"// Marshaling '{argumentName}' to native string array");
-                            var nativeName = $"native_{argumentName}";
-                            writer.WriteLine($"var {argumentName}_byteCounts = stackalloc int[{argumentName}.Length];");
-                            writer.WriteLine($"var {argumentName}_byteCount = 0;");
-                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                            writer.PushBlock();
-                            writer.WriteLine($"{argumentName}_byteCounts[i] = Encoding.UTF8.GetByteCount({argumentName}[i]);");
-                            writer.WriteLine($"{argumentName}_byteCount += {argumentName}_byteCounts[i] + 1;");
-                            writer.PopBlock();
-                            
-                            writer.WriteLine($"var {nativeName}_data = stackalloc byte[{argumentName}_byteCount];");
-                            writer.WriteLine($"var {argumentName}_offset = 0;");
-                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                            writer.PushBlock();
-                            writer.WriteLine($"var s = {argumentName}[i];");
-                            writer.WriteLine($"{argumentName}_offset += Util.GetUtf8(s, {nativeName}_data + {argumentName}_offset, {argumentName}_byteCounts[i]);");
-                            writer.WriteLine($"{nativeName}_data[{argumentName}_offset++] = 0;");
-                            writer.PopBlock();
-                            
-                            writer.WriteLine($"var {nativeName} = stackalloc byte*[{argumentName}.Length];");
-                            writer.WriteLine($"{argumentName}_offset = 0;");
-                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                            writer.PushBlock();
-                            writer.WriteLine($"{nativeName}[i] = &{nativeName}_data[{argumentName}_offset];");
-                            writer.WriteLine($"{argumentName}_offset += {argumentName}_byteCounts[i] + 1;");
-                            writer.PopBlock();
-                        });
+                            paramType = "string";
+                            beforeCall.Add(() =>
+                            {
+                                writer.WriteLine($"// Marshaling '{argumentName}' to native string array");
+                                var nativeName = $"native_{argumentName}";
+                                writer.WriteLine($"var {argumentName}_byteCounts = stackalloc int[{argumentName}.Length];");
+                                writer.WriteLine($"var {argumentName}_byteCount = 0;");
+                                writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                                writer.PushBlock();
+                                writer.WriteLine($"{argumentName}_byteCounts[i] = Encoding.UTF8.GetByteCount({argumentName}[i]);");
+                                writer.WriteLine($"{argumentName}_byteCount += {argumentName}_byteCounts[i] + 1;");
+                                writer.PopBlock();
+                                
+                                writer.WriteLine($"var {nativeName}_data = stackalloc byte[{argumentName}_byteCount];");
+                                writer.WriteLine($"var {argumentName}_offset = 0;");
+                                writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                                writer.PushBlock();
+                                writer.WriteLine($"var s = {argumentName}[i];");
+                                writer.WriteLine($"{argumentName}_offset += Util.GetUtf8(s, {nativeName}_data + {argumentName}_offset, {argumentName}_byteCounts[i]);");
+                                writer.WriteLine($"{nativeName}_data[{argumentName}_offset++] = 0;");
+                                writer.PopBlock();
+                                
+                                writer.WriteLine($"var {nativeName} = stackalloc byte*[{argumentName}.Length];");
+                                writer.WriteLine($"{argumentName}_offset = 0;");
+                                writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                                writer.PushBlock();
+                                writer.WriteLine($"{nativeName}[i] = &{nativeName}_data[{argumentName}_offset];");
+                                writer.WriteLine($"{argumentName}_offset += {argumentName}_byteCounts[i] + 1;");
+                                writer.PopBlock();
+                            });
+                        }
+                        else
+                        {
+                            throw new NotImplementedException();
+                        }
                     }
                     else
                     {
-                        throw new NotImplementedException();
+                        beforeCall.Add(() =>
+                        {
+                            writer.WriteLine($"// Marshaling '{argumentName}' to native {paramType} array");
+                            writer.WriteLine($"var native_{argumentName} = stackalloc {paramType}[{argumentName}.Length];");
+                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
+                            writer.PushBlock();
+                            writer.WriteLine($"native_{argumentName}[i] = {argumentName}[i];");
+                            writer.PopBlock();
+                        });
                     }
+                    
+                    managedParameters.Add(($"{paramType}[]", argumentName));
+                    nativeParameters.Add($"native_{argumentName}");
+                    continue;
                 }
+                // Delegates
+                else if (argumentTypeDesc.Kind == "Type")
+                {
+                    var delegateName = function.Name + argumentName + "Delegate";
+                    managedParameters.Add((delegateName, argumentName));
+                    nativeParameters.Add(argumentName);
+                }
+                // Other types
                 else
                 {
-                    beforeCall.Add(() =>
+                    if (argumentTypeDesc.Kind == "Pointer")
                     {
-                        writer.WriteLine($"// Marshaling '{argumentName}' to native {paramType} array");
-                        writer.WriteLine($"var native_{argumentName} = stackalloc {paramType}[{argumentName}.Length];");
-                        writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                        writer.PushBlock();
-                        writer.WriteLine($"native_{argumentName}[i] = {argumentName}[i];");
-                        writer.PopBlock();
-                    });
-                }
-                
-                managedParameters.Add(($"{paramType}[]", argumentName));
-                nativeParameters.Add($"native_{argumentName}");
-                continue;
-            }
-            // Delegates
-            else if (argumentTypeDesc.Kind == "Type")
-            {
-                var delegateName = function.Name + argumentName + "Delegate";
-                managedParameters.Add((delegateName, argumentName));
-                nativeParameters.Add(argumentName);
-            }
-            // Other types
-            else
-            {
-                if (argumentTypeDesc.Kind == "Pointer")
-                {
-                    // String
-                    if (argumentTypeDesc.InnerType!.BuiltinType == "char")
-                    {
-                        managedParameters.Add(("ReadOnlySpan<char>", argumentName));
-                        nativeParameters.Add($"native_{argumentName}");
-                        beforeCall.Add(() =>
+                        // String
+                        if (argumentTypeDesc.InnerType!.BuiltinType == "char")
                         {
-                            writer.WriteLine($"// Marshaling '{argumentName}' to native string");
-                            var nativeName = $"native_{argumentName}";
-                            writer.WriteLine($"byte* {nativeName};");
-                            writer.WriteLine($"var {argumentName}_byteCount = 0;");
-                            writer.WriteLine($"if ({argumentName} != null)");
-                            writer.PushBlock();
-                            writer.WriteLine($"{argumentName}_byteCount = Encoding.UTF8.GetByteCount({argumentName});");
-                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
-                            writer.PushBlock();
-                            writer.WriteLine($"{nativeName} = Util.Allocate({argumentName}_byteCount + 1);");
-                            writer.PopBlock();
-                            writer.WriteLine("else");
-                            writer.PushBlock();
-                            writer.WriteLine($"var {nativeName}_stackBytes = stackalloc byte[{argumentName}_byteCount + 1];");
-                            writer.WriteLine($"{nativeName} = {nativeName}_stackBytes;");
-                            writer.PopBlock();
-                            writer.WriteLine($"var {argumentName}_offset = Util.GetUtf8({argumentName}, {nativeName}, {argumentName}_byteCount);");
-                            writer.WriteLine($"{nativeName}[{argumentName}_offset] = 0;");
-                            writer.PopBlock();
-                            writer.WriteLine($"else {nativeName} = null;");
-                        });
-                        afterCall.Add(() =>
+                            if (argumentTypeDesc.InnerType!.StorageClasses is not null && argumentTypeDesc.InnerType!.StorageClasses.Contains("const"))
+                            {
+                                managedParameters.Add(("ReadOnlySpan<char>", argumentName));
+                                nativeParameters.Add($"native_{argumentName}");
+                                beforeCall.Add(() =>
+                                {
+                                    writer.WriteLine($"// Marshaling '{argumentName}' to native string");
+                                    var nativeName = $"native_{argumentName}";
+                                    writer.WriteLine($"byte* {nativeName};");
+                                    writer.WriteLine($"var {argumentName}_byteCount = 0;");
+                                    writer.WriteLine($"if ({argumentName} != null)");
+                                    writer.PushBlock();
+                                    writer.WriteLine(
+                                        $"{argumentName}_byteCount = Encoding.UTF8.GetByteCount({argumentName});");
+                                    writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
+                                    writer.PushBlock();
+                                    writer.WriteLine($"{nativeName} = Util.Allocate({argumentName}_byteCount + 1);");
+                                    writer.PopBlock();
+                                    writer.WriteLine("else");
+                                    writer.PushBlock();
+                                    writer.WriteLine(
+                                        $"var {nativeName}_stackBytes = stackalloc byte[{argumentName}_byteCount + 1];");
+                                    writer.WriteLine($"{nativeName} = {nativeName}_stackBytes;");
+                                    writer.PopBlock();
+                                    writer.WriteLine(
+                                        $"var {argumentName}_offset = Util.GetUtf8({argumentName}, {nativeName}, {argumentName}_byteCount);");
+                                    writer.WriteLine($"{nativeName}[{argumentName}_offset] = 0;");
+                                    writer.PopBlock();
+                                    writer.WriteLine($"else {nativeName} = null;");
+                                });
+                                afterCall.Add(() =>
+                                {
+                                    writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
+                                    writer.PushBlock();
+                                    writer.WriteLine($"Util.Free(native_{argumentName});");
+                                    writer.PopBlock();
+                                });
+                                continue;
+                            }
+                            else
+                            {
+                                managedParameters.Add(("byte[]", argumentName));
+                                nativeParameters.Add($"native_{argumentName}");
+                                fixedBlocks.Add(() =>
+                                {
+                                    writer.WriteLine($"fixed (byte* native_{argumentName} = {argumentName})");
+                                });
+                                continue;
+                            }
+                        }
+                        // Ref Bool
+                        else if (argumentTypeDesc.InnerType!.BuiltinType == "bool")
                         {
-                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
-                            writer.PushBlock();
-                            writer.WriteLine($"Util.Free(native_{argumentName});");
-                            writer.PopBlock();
-                        });
-                        continue;
-                    }
-                    // Ref Bool
-                    else if (argumentTypeDesc.InnerType!.BuiltinType == "bool")
-                    {
-                        managedParameters.Add(("ref bool", argumentName));
-                        nativeParameters.Add($"native_{argumentName}");
-                        beforeCall.Add(() =>
-                        {
-                            writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
-                            writer.WriteLine($"var native_{argumentName}_val = {argumentName} ? (byte)1 : (byte)0;");
-                            writer.WriteLine($"var native_{argumentName} = &native_{argumentName}_val;");
-                        });
-                        afterCall.Add(() =>
-                        {
-                            writer.WriteLine($"{argumentName} = native_{argumentName}_val != 0;");
-                        });
-                        continue;
-                    }
-                    // Ref T
-                    else if (argumentTypeDesc.InnerType!.Kind == "Builtin")
-                    {
-                        if (argumentTypeDesc.InnerType.BuiltinType == "void")
-                        {
-                            managedParameters.Add(("IntPtr", argumentName));
+                            managedParameters.Add(("ref bool", argumentName));
                             nativeParameters.Add($"native_{argumentName}");
                             beforeCall.Add(() =>
                             {
-                                writer.WriteLine($"var native_{argumentName} = {argumentName}.ToPointer();");
+                                writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
+                                writer.WriteLine($"var native_{argumentName}_val = {argumentName} ? (byte)1 : (byte)0;");
+                                writer.WriteLine($"var native_{argumentName} = &native_{argumentName}_val;");
+                            });
+                            afterCall.Add(() =>
+                            {
+                                writer.WriteLine($"{argumentName} = native_{argumentName}_val != 0;");
                             });
                             continue;
                         }
-                        var argumentType = GetCSharpType(argumentTypeDesc.InnerType!);
-                        managedParameters.Add(($"ref {argumentType}", argumentName));
-                        nativeParameters.Add($"native_{argumentName}");
-                        fixedBlocks.Add(() =>
+                        // Ref T
+                        else if (argumentTypeDesc.InnerType!.Kind == "Builtin")
                         {
-                            writer.WriteLine($"fixed ({argumentType}* native_{argumentName} = &{argumentName})");
-                        });
-                        continue;
+                            if (argumentTypeDesc.InnerType.BuiltinType == "void")
+                            {
+                                managedParameters.Add(("IntPtr", argumentName));
+                                nativeParameters.Add($"native_{argumentName}");
+                                beforeCall.Add(() =>
+                                {
+                                    writer.WriteLine($"var native_{argumentName} = {argumentName}.ToPointer();");
+                                });
+                                continue;
+                            }
+                            var argumentType = GetCSharpType(argumentTypeDesc.InnerType!);
+                            managedParameters.Add(($"ref {argumentType}", argumentName));
+                            nativeParameters.Add($"native_{argumentName}");
+                            fixedBlocks.Add(() =>
+                            {
+                                writer.WriteLine($"fixed ({argumentType}* native_{argumentName} = &{argumentName})");
+                            });
+                            continue;
+                        }
                     }
-                }
-                else
-                {
-                    if (argumentTypeDesc.BuiltinType == "bool")
+                    else
                     {
-                        managedParameters.Add(("bool", argumentName));
-                        nativeParameters.Add($"native_{argumentName}");
-                        beforeCall.Add(() =>
+                        if (argumentTypeDesc.BuiltinType == "bool")
                         {
-                            writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
-                            writer.WriteLine($"var native_{argumentName} = {argumentName} ? (byte)1 : (byte)0;");
-                        });
-                        continue;
+                            managedParameters.Add(("bool", argumentName));
+                            nativeParameters.Add($"native_{argumentName}");
+                            beforeCall.Add(() =>
+                            {
+                                writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
+                                writer.WriteLine($"var native_{argumentName} = {argumentName} ? (byte)1 : (byte)0;");
+                            });
+                            continue;
+                        }
                     }
-                }
-                var csharpType = GetCSharpType(argumentTypeDesc);
-                if (csharpType.Contains("ImVector_") && csharpType.EndsWith('*'))
-                {
-                    csharpType = "ImVector*";
-                }
-                else if (csharpType.Contains('*') && !csharpType.Contains("ImVector"))
-                {
-                    if (GetWrappedType(csharpType, out var wrappedType))
+                    var csharpType = GetCSharpType(argumentTypeDesc);
+                    if (csharpType.Contains("ImVector_") && csharpType.EndsWith('*'))
                     {
-                        csharpType = wrappedType;
+                        csharpType = "ImVector*";
                     }
+                    else if (csharpType.Contains('*') && !csharpType.Contains("ImVector"))
+                    {
+                        if (GetWrappedType(csharpType, out var wrappedType))
+                        {
+                            csharpType = wrappedType;
+                        }
+                    }
+                        
+                    managedParameters.Add((csharpType, argumentName));
+                    nativeParameters.Add(argumentName);
                 }
-                    
-                managedParameters.Add((csharpType, argumentName));
-                nativeParameters.Add(argumentName);
             }
-        }
             
-        writer.WriteCommentary(CleanupComments(function.Comments));
-
-        writer.WriteLine($"public{(isStatic ? " static" : "")} {safeReturnType} {functionName}({string.Join(", ", managedParameters.Select(p => p.type + " " + p.name))})");
-        writer.PushBlock();
-
-        foreach (var action in beforeCall)
-        {
-            action();
-            writer.WriteLine();
+            return new MethodParameters(managedParameters, nativeParameters, beforeCall, afterCall, fixedBlocks);
         }
-        
-        if (fixedBlocks.Count > 0)
+
+        void WriteMethod(string functionName, (string safeReturnType, string returnCode) methodReturn, MethodParameters parameters)
         {
-            foreach (var action in fixedBlocks)
-                action();
+            writer.WriteCommentary(CleanupComments(function.Comments));
+
+            writer.WriteLine($"public{(isStatic ? " static" : "")} {methodReturn.safeReturnType} {functionName}({string.Join(", ", parameters.ManagedParameters.Select(p => p.type + " " + p.name))})");
             writer.PushBlock();
-        }
-        
-        writer.WriteLine($"{(safeReturnType == "void" ? "" : $"var ret = ")}{_nativeClass}.{function.Name}({string.Join(", ", nativeParameters)});");
 
-        foreach (var action in afterCall)
-            action();
+            foreach (var action in parameters.BeforeCall)
+            {
+                action();
+                writer.WriteLine();
+            }
         
-        if (csharpReturnType!= "void")
-            writer.WriteLine($"return {returnCode};");
+            if (parameters.FixedBlocks.Count > 0)
+            {
+                foreach (var action in parameters.FixedBlocks)
+                    action();
+                writer.PushBlock();
+            }
+        
+            writer.WriteLine($"{(methodReturn.safeReturnType == "void" ? "" : $"var ret = ")}{_nativeClass}.{function.Name}({string.Join(", ", parameters.NativeParameters)});");
 
-        if (fixedBlocks.Count > 0)
+            foreach (var action in parameters.AfterCall)
+                action();
+        
+            if (methodReturn.safeReturnType != "void")
+                writer.WriteLine($"return {methodReturn.returnCode};");
+
+            if (parameters.FixedBlocks.Count > 0)
+                writer.PopBlock();
+        
             writer.PopBlock();
-        
-        writer.PopBlock();
+        }
     }
 
     private string GetCSharpType(TypeDescription typeDescription)
