@@ -4,7 +4,6 @@ using System.Data;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Security.AccessControl;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -16,42 +15,29 @@ public class CSharpGenerator
     private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
     
     private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
-    private string _namespace = "SharpImGui";
-    private string _mainMethodsClass = "ImGui";
-    private string _nativeClass = "ImGuiNative";
 
-    private readonly HashSet<string> _pointerStructs = [];
-    private readonly Dictionary<string, List<(string name, string value)>> _enums = new();
-    private readonly Dictionary<string, string> _foundedTypes = new();
-    private readonly Dictionary<string, int> _arraySizes = new();
-    private readonly Dictionary<string, (string? type, string value)> _knownDefines = new()
-    {
-        ["IMGUI_DISABLE_OBSOLETE_FUNCTIONS"] = (null, ""),
-        ["IMGUI_DISABLE_OBSOLETE_KEYIO"] = (null, "")
-    };
-
-    private readonly List<(string content, Comments? comments)> _delegates = [];
+    private Context? _context;
 
     public void Generate()
     {
         if (Directory.Exists(_outputPath))
             Directory.Delete(_outputPath, true);
         
+        _context = new Context();
+        MethodGenerator.Context = _context;
+        
         _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
-        _namespace = "SharpImGui";
-        _mainMethodsClass = "ImGui";
-        _nativeClass = "ImGuiNative";
+        _context.Namespace = "SharpImGui";
+        _context.MainMethodsClass = "ImGui";
+        _context.NativeClass = "ImGuiNative";
         GenerateBindings("dcimgui.json");
         
         _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated/Internal");
-        _namespace = "SharpImGui.Internal";
-        _mainMethodsClass = "ImGuiInternal";
-        _nativeClass = "ImGuiInternalNative";
-        // _foundedTypes.Clear();
-        // _arraySizes.Clear();
-        // _knownDefines.Clear();
-        _pointerStructs.Clear();
-        _delegates.Clear();
+        _context.Namespace = "SharpImGui.Internal";
+        _context.MainMethodsClass = "ImGuiInternal";
+        _context.NativeClass = "ImGuiInternalNative";
+        _context.PointerStructs.Clear();
+        _context.Delegates.Clear();
         GenerateBindings("dcimgui_internal.json");
     }
 
@@ -90,8 +76,8 @@ public class CSharpGenerator
                     innerType = innerType.InnerType;
                     
                     var @delegate = GenerateDelegateFromDescription(innerType, name!);
-                    var comment = CleanupComments(typedef.Comments);
-                    _delegates.Add((@delegate, comment));
+                    var comment = _context.CleanupComments(typedef.Comments);
+                    _context.Delegates.Add((@delegate, comment));
                     continue;
                 }
             }
@@ -99,8 +85,8 @@ public class CSharpGenerator
             if (typedef.Name.Contains("flags", StringComparison.OrdinalIgnoreCase))
                 continue;
                 
-            var csharpType = GetCSharpType(typedef.Type.Description);
-            _foundedTypes.TryAdd(typedef.Name, csharpType);
+            var csharpType = _context.GetCSharpType(typedef.Type.Description);
+            _context.FoundedTypes.TryAdd(typedef.Name, csharpType);
         }
     }
 
@@ -110,15 +96,15 @@ public class CSharpGenerator
 
         writer.Using("System");
         writer.WriteLine();
-        writer.StartNamespace(_namespace);
+        writer.StartNamespace(_context.Namespace);
         writer.WriteLine("public static class Constants");
         writer.PushBlock();
         // dear_bindings writes defines in a strange manner, producing redefines, so when we group them by count, we can produce more accurate result
         var defineGroups = defines.GroupBy(x => x.Conditionals?.Count ?? 0);
 
-        foreach (var key in _knownDefines.Keys)
+        foreach (var key in _context.KnownDefines.Keys)
         {
-            writer.WriteLine($"public const string {key} = \"{_knownDefines[key].value.Replace("\"", "\\\"")}\";");
+            writer.WriteLine($"public const string {key} = \"{_context.KnownDefines[key].value.Replace("\"", "\\\"")}\";");
         }
 
         foreach (var group in defineGroups)
@@ -128,35 +114,35 @@ public class CSharpGenerator
                 foreach (var define in group)
                 {
                     var constant = GenerateConstant(define);
-                    writer.WriteCommentary(CleanupComments(define.Comments));
+                    writer.WriteCommentary(_context.CleanupComments(define.Comments));
                     writer.WriteLine($"public const {constant.Type} {constant.Name} = {constant.Value};");
-                    _knownDefines[define.Name] = (constant.Type, define.Content?? "");
+                    _context.KnownDefines[define.Name] = (constant.Type, define.Content?? "");
                 }
             }
             else if (group.Key == 1)
             {
                 foreach (var define in group)
                 {
-                    if (!EvalConditionals(define.Conditionals))
+                    if (!_context.EvalConditionals(define.Conditionals))
                         continue;
                     
                     var constant = GenerateConstant(define);
-                    writer.WriteCommentary(CleanupComments(define.Comments));
+                    writer.WriteCommentary(_context.CleanupComments(define.Comments));
                     writer.WriteLine($"public const {constant.Type} {constant.Name} = {constant.Value};");
-                    _knownDefines[define.Name] = (constant.Type, define.Content?? "");
+                    _context.KnownDefines[define.Name] = (constant.Type, define.Content?? "");
                 }
             }
             else
             {
                 foreach (var define in group)
                 {
-                    if (!EvalConditionals(define.Conditionals))
+                    if (!_context.EvalConditionals(define.Conditionals))
                         continue;
                     
                     var constant = GenerateConstant(define);
-                    writer.WriteCommentary(CleanupComments(define.Comments));
+                    writer.WriteCommentary(_context.CleanupComments(define.Comments));
                     writer.WriteLine($"public const {constant.Type} {constant.Name} = {constant.Value};");
-                    _knownDefines[define.Name] = (constant.Type, define.Content?? "");
+                    _context.KnownDefines[define.Name] = (constant.Type, define.Content?? "");
                 }
             }
         }
@@ -173,10 +159,10 @@ public class CSharpGenerator
                 return (defineItem.Name, "bool", "true");
             }
 
-            if (_knownDefines.ContainsKey(defineItem.Content))
+            if (_context.KnownDefines.ContainsKey(defineItem.Content))
             {
-                var contentConstant = _knownDefines.Keys.FirstOrDefault(c => c == defineItem.Content, null);
-                var type = _knownDefines[contentConstant].type ?? "bool";
+                var contentConstant = _context.KnownDefines.Keys.FirstOrDefault(c => c == defineItem.Content, null);
+                var type = _context.KnownDefines[contentConstant].type ?? "bool";
                 return (defineItem.Name, type, defineItem.Content);
             }
 
@@ -202,11 +188,11 @@ public class CSharpGenerator
 
         writer.Using("System");
         writer.WriteLine();
-        writer.StartNamespace(_namespace);
+        writer.StartNamespace(_context.Namespace);
         
         foreach (var @enum in enums)
         {
-            if (!EvalConditionals(@enum.Conditionals))
+            if (!_context.EvalConditionals(@enum.Conditionals))
                 continue;
             
             var enumName = @enum.Name;
@@ -220,18 +206,18 @@ public class CSharpGenerator
                 enumName = enumName.Replace("Private", "");
                 enumNameCleaned = enumNameCleaned.Replace("Private", "");
 
-                if (_enums.TryGetValue(enumNameCleaned, out var elements))
+                if (_context.Enums.TryGetValue(enumNameCleaned, out var elements))
                 {
                     isExtenssion = true;
                     extendedElements = elements;
                 }
             }
-            _foundedTypes.TryAdd(enumNameCleaned, enumNameCleaned);
+            _context.FoundedTypes.TryAdd(enumNameCleaned, enumNameCleaned);
             
             if (!isExtenssion)
-                _enums.Add(enumNameCleaned, []);
+                _context.Enums.Add(enumNameCleaned, []);
             
-            writer.WriteCommentary(CleanupComments(@enum.Comments));
+            writer.WriteCommentary(_context.CleanupComments(@enum.Comments));
             if (@enum.IsFlagsEnum)
                 writer.WriteLine("[Flags]");
 
@@ -251,24 +237,24 @@ public class CSharpGenerator
             
             foreach (var element in @enum.Elements)
             {
-                if (!EvalConditionals(element.Conditionals))
+                if (!_context.EvalConditionals(element.Conditionals))
                     continue;
                 
                 
                 if (element.Name.Contains("COUNT", StringComparison.Ordinal))
                 {
-                    _arraySizes[element.Name] = (int)element.Value;
+                    _context.ArraySizes[element.Name] = (int)element.Value;
                 }
                 
                 var value = element.Value.ToString(CultureInfo.InvariantCulture);
                 if (element.ValueExpression != null)
                     value = CleanupEnumElement(element.ValueExpression, enumName);
                 
-                writer.WriteCommentary(CleanupComments(element.Comments));
+                writer.WriteCommentary(_context.CleanupComments(element.Comments));
                 var cleanedName = CleanupEnumElement(element.Name, enumName);
                 writer.WriteLine($"{cleanedName} = {value},");
                 
-                _enums[enumNameCleaned].Add((cleanedName, value));
+                _context.Enums[enumNameCleaned].Add((cleanedName, value));
             }
             
             writer.PopBlock();
@@ -319,8 +305,8 @@ public class CSharpGenerator
             
             if (@struct.Fields.Count == 0)
             {
-                // _foundedTypes.TryAdd(structName, "IntPtr");
-                _pointerStructs.Add(structName);
+                // _context.FoundedTypes.TryAdd(structName, "IntPtr");
+                _context.PointerStructs.Add(structName);
                 continue;
             }
             
@@ -334,35 +320,35 @@ public class CSharpGenerator
             writer.Using("System.Runtime.CompilerServices");
             writer.Using("System.Text");
             writer.WriteLine();
-            writer.StartNamespace(_namespace);
+            writer.StartNamespace(_context.Namespace);
             
-            _foundedTypes.Add(@struct.Name, structName);
+            _context.FoundedTypes.Add(@struct.Name, structName);
             
-            writer.WriteCommentary(CleanupComments(@struct.Comments));
+            writer.WriteCommentary(_context.CleanupComments(@struct.Comments));
             writer.WriteLine($"public unsafe partial struct {structName}");
             writer.PushBlock();
             
             foreach (var field in @struct.Fields)
             {
-                if (!EvalConditionals(field.Conditionals))
+                if (!_context.EvalConditionals(field.Conditionals))
                     continue;
                 
                 if (field.Name.Contains("__anonymous_type"))
                     continue;
                 
-                var fieldType = GetCSharpType(field.Type.Description);
+                var fieldType = _context.GetCSharpType(field.Type.Description);
 
                 
-                writer.WriteCommentary(CleanupComments(field.Comments));
+                writer.WriteCommentary(_context.CleanupComments(field.Comments));
                 var nativeType = field.Type.Description;
                 
                 if (field.IsArray)
                 {
-                    var arraySize = _arraySizes.GetValueOrDefault(field.ArrayBounds!, 0);
+                    var arraySize = _context.ArraySizes.GetValueOrDefault(field.ArrayBounds!, 0);
                     if (arraySize == 0)
                     {
                         var arrayBounds = field.ArrayBounds!;
-                        foreach (var define in _knownDefines)
+                        foreach (var define in _context.KnownDefines)
                         {
                             if (arrayBounds.Contains(define.Key))
                             {
@@ -380,10 +366,10 @@ public class CSharpGenerator
                         try { arraySize = Convert.ToInt32(arraySizeTable.Compute(arrayBounds, "")); }
                         catch (Exception e) { Console.WriteLine($"Cannot compute array size for {field.Name} with bounds {arrayBounds}: {e.Message}"); }
                         
-                        _arraySizes[field.ArrayBounds!] = arraySize;
+                        _context.ArraySizes[field.ArrayBounds!] = arraySize;
                     }
                     
-                    fieldType = GetCSharpType(field.Type.Description.InnerType!);
+                    fieldType = _context.GetCSharpType(field.Type.Description.InnerType!);
                     
                     if (fieldType.Contains("ImVector"))
                     {
@@ -416,7 +402,7 @@ public class CSharpGenerator
                         innerType = innerType.InnerType!;
 
                         var cSharpDelegate = GenerateDelegateFromDescription(innerType, name + "Delegate");
-                        _delegates.Add((cSharpDelegate, null));
+                        _context.Delegates.Add((cSharpDelegate, null));
                     }
                     else
                     {
@@ -439,7 +425,7 @@ public class CSharpGenerator
             writer.PopBlock();
             writer.WriteLine();
 
-            writer.WriteCommentary(CleanupComments(@struct.Comments));
+            writer.WriteCommentary(_context.CleanupComments(@struct.Comments));
             var ptrStructName = $"{structName}Ptr";
             writer.WriteLine($"public unsafe partial struct {ptrStructName}");
             writer.PushBlock();
@@ -452,7 +438,7 @@ public class CSharpGenerator
 
             foreach (var field in @struct.Fields)
             {
-                if (!EvalConditionals(field.Conditionals))
+                if (!_context.EvalConditionals(field.Conditionals))
                     continue;
                 
                 if (field.Name.Contains("__anonymous_type"))
@@ -460,9 +446,9 @@ public class CSharpGenerator
                 
                 writer.WriteLine();
                 
-                var fieldType = GetCSharpType(field.Type.Description);
+                var fieldType = _context.GetCSharpType(field.Type.Description);
 
-                writer.WriteCommentary(CleanupComments(field.Comments));
+                writer.WriteCommentary(_context.CleanupComments(field.Comments));
                 if (structName == "ImDrawData" && field.Name == "CmdLists")
                 {
                         
@@ -470,12 +456,12 @@ public class CSharpGenerator
 
                 if (field.IsArray)
                 {
-                    fieldType = GetCSharpType(field.Type.Description.InnerType!);
-                    var arraySize = _arraySizes.GetValueOrDefault(field.ArrayBounds!, 0).ToString();
+                    fieldType = _context.GetCSharpType(field.Type.Description.InnerType!);
+                    var arraySize = _context.ArraySizes.GetValueOrDefault(field.ArrayBounds!, 0).ToString();
                     if (arraySize == "0")
                     {
                         arraySize = field.ArrayBounds!;
-                        foreach (var define in _knownDefines)
+                        foreach (var define in _context.KnownDefines)
                         {
                             if (arraySize.Contains(define.Key))
                             {
@@ -494,13 +480,13 @@ public class CSharpGenerator
                             fieldType = conversionType;
                         }
 
-                        if (GetWrappedType($"{fieldType}*", out var wrappedType))
+                        if (_context.GetWrappedType($"{fieldType}*", out var wrappedType))
                         {
                             fieldType = $"ImPtrVector<{wrappedType}>";
                         }
                         else
                         {
-                            if (GetWrappedType(fieldType, out wrappedType))
+                            if (_context.GetWrappedType(fieldType, out wrappedType))
                             {
                                 fieldType = wrappedType;
                             }
@@ -534,13 +520,13 @@ public class CSharpGenerator
                         elementType = conversionType;
                     }
 
-                    if (GetWrappedType($"{elementType}*", out var wrappedType))
+                    if (_context.GetWrappedType($"{elementType}*", out var wrappedType))
                     {
                         writer.WriteLine($"public ImPtrVector<{wrappedType}> {field.Name} => new ImPtrVector<{wrappedType}>(NativePtr->{field.Name}, Unsafe.SizeOf<{elementType}>());");
                     }
                     else
                     {
-                        if (GetWrappedType(elementType, out wrappedType))
+                        if (_context.GetWrappedType(elementType, out wrappedType))
                         {
                             elementType = wrappedType;
                         }
@@ -551,7 +537,7 @@ public class CSharpGenerator
                 {
                     if (fieldType.Contains('*') && !fieldType.Contains("ImVector"))
                     {
-                        if (GetWrappedType(fieldType, out var wrappedType))
+                        if (_context.GetWrappedType(fieldType, out var wrappedType))
                         {
                             writer.WriteLine($"public {wrappedType} {field.Name} => new {wrappedType}(NativePtr->{field.Name});");
                         }
@@ -581,7 +567,7 @@ public class CSharpGenerator
                 {
                     continue;
                 }
-                if (!EvalConditionals(function.Conditionals))
+                if (!_context.EvalConditionals(function.Conditionals))
                 {
                     continue;
                 }
@@ -589,29 +575,37 @@ public class CSharpGenerator
                     continue;
                 
                 writer.WriteLine();
-                WriteMethodOverload(function, writer, structName);
+                MethodGenerator.WriteMethodOverload(function, writer);
             }
             
             writer.PopBlock();
             writer.EndNamespace();
             arraySizeTable.Dispose();
         }
+        
+        return;
+        
+        bool IsStringFieldName(string name)
+        {
+            return Regex.IsMatch(name, ".*Filename.*")
+                   || Regex.IsMatch(name, ".*Name");
+        }
     }
 
     private void GenerateMethods(IReadOnlyList<FunctionItem> functions)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, $"{_nativeClass}.gen.cs");
+        using var writer = new CSharpCodeWriter(_outputPath, $"{_context.NativeClass}.gen.cs");
 
         writer.Using("System");
         writer.Using("System.Numerics");
         writer.Using("System.Runtime.InteropServices");
-        writer.StartNamespace(_namespace);
-        writer.WriteLine($"public static unsafe partial class {_nativeClass}");
+        writer.StartNamespace(_context.Namespace);
+        writer.WriteLine($"public static unsafe partial class {_context.NativeClass}");
         writer.PushBlock();
 
         foreach (var function in functions)
         {
-            if (!EvalConditionals(function.Conditionals))
+            if (!_context.EvalConditionals(function.Conditionals))
                 continue;
             
             var functionName = function.Name;
@@ -621,7 +615,7 @@ public class CSharpGenerator
             if (function.Arguments.Count > 0 && function.Arguments[^1].Type?.Declaration == "va_list")
                 continue;
             
-            var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
+            var csharpReturnType = _context.GetCSharpType(function.ReturnType!.Description);
             var parameters = new List<string>();
             
             foreach (var argument in function.Arguments)
@@ -638,7 +632,7 @@ public class CSharpGenerator
 
                 if (argumentTypeDesc.Kind == "Array")
                 {
-                    var paramType = GetCSharpType(argumentTypeDesc.InnerType!);
+                    var paramType = _context.GetCSharpType(argumentTypeDesc.InnerType!);
                     parameters.Add($"{paramType}* {argumentName}");
                 }
                 else if (argumentTypeDesc.Kind == "Type")
@@ -655,7 +649,7 @@ public class CSharpGenerator
                         var delegateName = functionName + argumentName + "Delegate";
                         var csharpDelegate = GenerateDelegateFromDescription(innerType, delegateName);
                         
-                        _delegates.Add((csharpDelegate, null));
+                        _context.Delegates.Add((csharpDelegate, null));
 
                         parameters.Add($"{delegateName} {argumentName}");
                     }
@@ -666,7 +660,7 @@ public class CSharpGenerator
                 }
                 else
                 {
-                    var csharpType = GetCSharpType(argumentTypeDesc);
+                    var csharpType = _context.GetCSharpType(argumentTypeDesc);
                     //if type is ImVector_ImWchar* or ImVector_ImGuiTextFilter_ImGuiTextRange*, etc... will be converted to ImVector*
                     if (csharpType.Contains("ImVector_") && csharpType.EndsWith('*'))
                     {
@@ -676,7 +670,7 @@ public class CSharpGenerator
                 }
             }
             
-            writer.WriteCommentary(CleanupComments(function.Comments));
+            writer.WriteCommentary(_context.CleanupComments(function.Comments));
             writer.WriteLine($"[DllImport(\"dcimgui\", CallingConvention = CallingConvention.Cdecl, EntryPoint = \"{functionName}\")]");
             writer.WriteLine($"public static extern {csharpReturnType} {functionName}({string.Join(", ", parameters)});");
         }
@@ -692,9 +686,9 @@ public class CSharpGenerator
         writer.Using("System");
         writer.Using("System.Runtime.InteropServices");
         writer.WriteLine();
-        writer.StartNamespace(_namespace);
+        writer.StartNamespace(_context.Namespace);
         
-        foreach (var @delegate in _delegates)
+        foreach (var @delegate in _context.Delegates)
         {
             writer.WriteCommentary(@delegate.comments);
             writer.WriteLine("[UnmanagedFunctionPointer(CallingConvention.Cdecl)]");
@@ -706,7 +700,7 @@ public class CSharpGenerator
     
     private string GenerateDelegateFromDescription(TypeDescription description, string delegateName)
     {
-        var csharpReturnType = GetCSharpType(description.ReturnType!);
+        var csharpReturnType = _context.GetCSharpType(description.ReturnType!);
     
         var parameters = new List<string>();
         foreach (var parameter in description.Parameters!)
@@ -726,7 +720,7 @@ public class CSharpGenerator
                 Console.WriteLine($"Function parameter {parameter.Name} was not of kind Type. Was {parameter.Kind}");
             }
 
-            var csharpType = GetCSharpType(argumentType!);
+            var csharpType = _context.GetCSharpType(argumentType!);
         
             parameters.Add($"{csharpType} {argumentName}");
         }
@@ -736,7 +730,7 @@ public class CSharpGenerator
 
     private void GenerateMainOverloads(IReadOnlyList<FunctionItem> functions)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, $"{_mainMethodsClass}.gen.cs");
+        using var writer = new CSharpCodeWriter(_outputPath, $"{_context.MainMethodsClass}.gen.cs");
 
         writer.Using("System");
         writer.Using("System.Numerics");
@@ -744,13 +738,13 @@ public class CSharpGenerator
         writer.Using("System.Text");
         writer.WriteLine("// ReSharper disable InconsistentNaming");
         writer.WriteLine();
-        writer.StartNamespace(_namespace);
-        writer.WriteLine($"public static unsafe partial class {_mainMethodsClass}");
+        writer.StartNamespace(_context.Namespace);
+        writer.WriteLine($"public static unsafe partial class {_context.MainMethodsClass}");
         writer.PushBlock();
 
         foreach (var function in functions.Where(f => f.Name.StartsWith("ImGui_")))
         {
-            if (!EvalConditionals(function.Conditionals))
+            if (!_context.EvalConditionals(function.Conditionals))
                 continue;
             
             if (function.Arguments.Count > 0 && function.Arguments[^1].Type?.Declaration == "va_list")
@@ -758,547 +752,10 @@ public class CSharpGenerator
 
             writer.WriteLine();
                 
-            WriteMethodOverload(function, writer, null, true);
+            MethodGenerator.WriteMethodOverload(function, writer, true);
         }
         
         writer.PopBlock();
         writer.EndNamespace();
-    }
-    
-    private record MethodParameters(List<(string type, string name)> ManagedParameters, List<string> NativeParameters, List<Action> BeforeCall, List<Action> AfterCall, List<Action> FixedBlocks);
-
-    private void WriteMethodOverload(FunctionItem function, CSharpCodeWriter writer, string? structName, bool isStatic = false)
-    {
-        var functionName = function.Name.Split('_')[^1];
-        if (functionName.EndsWith("Ex"))
-        {
-            return;
-        }
-        
-        WriteMethod(functionName, GetReturnType(), GetParameters());
-        
-        return;
-
-        (string safeReturnType, string returnCode) GetReturnType()
-        {
-            var returnCode = "ret";
-            var csharpReturnType = GetCSharpType(function.ReturnType!.Description);
-            var isWrappedType = GetWrappedType(csharpReturnType, out var safeReturnType);
-            if (!isWrappedType)
-                safeReturnType = csharpReturnType;
-
-            if (csharpReturnType != "void")
-            {
-                if (function.ReturnType!.Description.BuiltinType == "bool")
-                {
-                    returnCode = $"ret != 0";
-                    safeReturnType = "bool";
-                }
-            }
-
-            return (safeReturnType, returnCode);
-        }
-
-        MethodParameters GetParameters()
-        {
-            var managedParameters = new List<(string type, string name)>();
-            var nativeParameters = new List<string>();
-            var beforeCall = new List<Action>();
-            var afterCall = new List<Action>();
-            var fixedBlocks = new List<Action>();
-            
-            foreach (var argument in function.Arguments)
-            {
-                if (argument.Type is null)
-                    continue;
-
-                // if (argument.DefaultValue is not null)
-                // {
-                    //TODO)) gerenate another overload without this argument, and call this function with default value instead of argument
-                // }
-                
-                var argumentName = argument.Name;
-                var argumentTypeDesc = argument.Type.Description;
-                
-                if (argumentName == "self")
-                {
-                    nativeParameters.Add("NativePtr");
-                    continue;
-                }
-                
-                if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
-                    argumentName = csharpIdentifier;
-                // Generate Overloads with Default Values
-                if (argument.DefaultValue != null)
-                {
-                    var startIndex = function.Arguments.IndexOf(argument);
-                    GenerateOverload(function.Arguments[new Range(startIndex, function.Arguments.Count)], 
-                        new MethodParameters([..managedParameters], [..nativeParameters], [..beforeCall], [..afterCall], [..fixedBlocks]));
-                }
-
-                
-                // Arrays
-                if (argumentTypeDesc.Kind == "Array")
-                {
-                    var paramType = GetCSharpType(argumentTypeDesc.InnerType!);
-                    
-                    if (argumentTypeDesc.InnerType!.Kind == "Pointer")
-                    {
-                        // String
-                        if (argumentTypeDesc.InnerType!.InnerType!.BuiltinType == "char")
-                        {
-                            paramType = "string";
-                            beforeCall.Add(() =>
-                            {
-                                writer.WriteLine($"// Marshaling '{argumentName}' to native string array");
-                                var nativeName = $"native_{argumentName}";
-                                writer.WriteLine($"var {argumentName}_byteCounts = stackalloc int[{argumentName}.Length];");
-                                writer.WriteLine($"var {argumentName}_byteCount = 0;");
-                                writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                                writer.PushBlock();
-                                writer.WriteLine($"{argumentName}_byteCounts[i] = Encoding.UTF8.GetByteCount({argumentName}[i]);");
-                                writer.WriteLine($"{argumentName}_byteCount += {argumentName}_byteCounts[i] + 1;");
-                                writer.PopBlock();
-                                
-                                writer.WriteLine($"var {nativeName}_data = stackalloc byte[{argumentName}_byteCount];");
-                                writer.WriteLine($"var {argumentName}_offset = 0;");
-                                writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                                writer.PushBlock();
-                                writer.WriteLine($"var s = {argumentName}[i];");
-                                writer.WriteLine($"{argumentName}_offset += Util.GetUtf8(s, {nativeName}_data + {argumentName}_offset, {argumentName}_byteCounts[i]);");
-                                writer.WriteLine($"{nativeName}_data[{argumentName}_offset++] = 0;");
-                                writer.PopBlock();
-                                
-                                writer.WriteLine($"var {nativeName} = stackalloc byte*[{argumentName}.Length];");
-                                writer.WriteLine($"{argumentName}_offset = 0;");
-                                writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                                writer.PushBlock();
-                                writer.WriteLine($"{nativeName}[i] = &{nativeName}_data[{argumentName}_offset];");
-                                writer.WriteLine($"{argumentName}_offset += {argumentName}_byteCounts[i] + 1;");
-                                writer.PopBlock();
-                            });
-                        }
-                        else
-                        {
-                            throw new NotImplementedException();
-                        }
-                    }
-                    else
-                    {
-                        beforeCall.Add(() =>
-                        {
-                            writer.WriteLine($"// Marshaling '{argumentName}' to native {paramType} array");
-                            writer.WriteLine($"var native_{argumentName} = stackalloc {paramType}[{argumentName}.Length];");
-                            writer.WriteLine($"for (var i = 0; i < {argumentName}.Length; i++)");
-                            writer.PushBlock();
-                            writer.WriteLine($"native_{argumentName}[i] = {argumentName}[i];");
-                            writer.PopBlock();
-                        });
-                    }
-                    
-                    managedParameters.Add(($"{paramType}[]", argumentName));
-                    nativeParameters.Add($"native_{argumentName}");
-                    continue;
-                }
-                // Delegates
-                else if (argumentTypeDesc.Kind == "Type")
-                {
-                    var delegateName = function.Name + argumentName + "Delegate";
-                    managedParameters.Add((delegateName, argumentName));
-                    nativeParameters.Add(argumentName);
-                }
-                // Other types
-                else
-                {
-                    if (argumentTypeDesc.Kind == "Pointer")
-                    {
-                        // String
-                        if (argumentTypeDesc.InnerType!.BuiltinType == "char")
-                        {
-                            if (argumentTypeDesc.InnerType!.StorageClasses is not null && argumentTypeDesc.InnerType!.StorageClasses.Contains("const"))
-                            {
-                                managedParameters.Add(("ReadOnlySpan<char>", argumentName));
-                                nativeParameters.Add($"native_{argumentName}");
-                                beforeCall.Add(() =>
-                                {
-                                    writer.WriteLine($"// Marshaling '{argumentName}' to native string");
-                                    var nativeName = $"native_{argumentName}";
-                                    writer.WriteLine($"byte* {nativeName};");
-                                    writer.WriteLine($"var {argumentName}_byteCount = 0;");
-                                    writer.WriteLine($"if ({argumentName} != null)");
-                                    writer.PushBlock();
-                                    writer.WriteLine(
-                                        $"{argumentName}_byteCount = Encoding.UTF8.GetByteCount({argumentName});");
-                                    writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
-                                    writer.PushBlock();
-                                    writer.WriteLine($"{nativeName} = Util.Allocate({argumentName}_byteCount + 1);");
-                                    writer.PopBlock();
-                                    writer.WriteLine("else");
-                                    writer.PushBlock();
-                                    writer.WriteLine(
-                                        $"var {nativeName}_stackBytes = stackalloc byte[{argumentName}_byteCount + 1];");
-                                    writer.WriteLine($"{nativeName} = {nativeName}_stackBytes;");
-                                    writer.PopBlock();
-                                    writer.WriteLine(
-                                        $"var {argumentName}_offset = Util.GetUtf8({argumentName}, {nativeName}, {argumentName}_byteCount);");
-                                    writer.WriteLine($"{nativeName}[{argumentName}_offset] = 0;");
-                                    writer.PopBlock();
-                                    writer.WriteLine($"else {nativeName} = null;");
-                                });
-                                afterCall.Add(() =>
-                                {
-                                    writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
-                                    writer.PushBlock();
-                                    writer.WriteLine($"Util.Free(native_{argumentName});");
-                                    writer.PopBlock();
-                                });
-                                continue;
-                            }
-                            else
-                            {
-                                managedParameters.Add(("byte[]", argumentName));
-                                nativeParameters.Add($"native_{argumentName}");
-                                fixedBlocks.Add(() =>
-                                {
-                                    writer.WriteLine($"fixed (byte* native_{argumentName} = {argumentName})");
-                                });
-                                continue;
-                            }
-                        }
-                        // Ref Bool
-                        else if (argumentTypeDesc.InnerType!.BuiltinType == "bool")
-                        {
-                            managedParameters.Add(("ref bool", argumentName));
-                            nativeParameters.Add($"native_{argumentName}");
-                            beforeCall.Add(() =>
-                            {
-                                writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
-                                writer.WriteLine($"var native_{argumentName}_val = {argumentName} ? (byte)1 : (byte)0;");
-                                writer.WriteLine($"var native_{argumentName} = &native_{argumentName}_val;");
-                            });
-                            afterCall.Add(() =>
-                            {
-                                writer.WriteLine($"{argumentName} = native_{argumentName}_val != 0;");
-                            });
-                            continue;
-                        }
-                        // Ref T
-                        else if (argumentTypeDesc.InnerType!.Kind == "Builtin")
-                        {
-                            if (argumentTypeDesc.InnerType.BuiltinType == "void")
-                            {
-                                managedParameters.Add(("IntPtr", argumentName));
-                                nativeParameters.Add($"native_{argumentName}");
-                                beforeCall.Add(() =>
-                                {
-                                    writer.WriteLine($"var native_{argumentName} = {argumentName}.ToPointer();");
-                                });
-                                continue;
-                            }
-                            var argumentType = GetCSharpType(argumentTypeDesc.InnerType!);
-                            managedParameters.Add(($"ref {argumentType}", argumentName));
-                            nativeParameters.Add($"native_{argumentName}");
-                            fixedBlocks.Add(() =>
-                            {
-                                writer.WriteLine($"fixed ({argumentType}* native_{argumentName} = &{argumentName})");
-                            });
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        if (argumentTypeDesc.BuiltinType == "bool")
-                        {
-                            managedParameters.Add(("bool", argumentName));
-                            nativeParameters.Add($"native_{argumentName}");
-                            beforeCall.Add(() =>
-                            {
-                                writer.WriteLine($"// Marshaling '{argumentName}' to native bool");
-                                writer.WriteLine($"var native_{argumentName} = {argumentName} ? (byte)1 : (byte)0;");
-                            });
-                            continue;
-                        }
-                    }
-                    var csharpType = GetCSharpType(argumentTypeDesc);
-                    if (csharpType.Contains("ImVector_") && csharpType.EndsWith('*'))
-                    {
-                        csharpType = "ImVector*";
-                    }
-                    else if (csharpType.Contains('*') && !csharpType.Contains("ImVector"))
-                    {
-                        if (GetWrappedType(csharpType, out var wrappedType))
-                        {
-                            csharpType = wrappedType;
-                        }
-                    }
-                        
-                    managedParameters.Add((csharpType, argumentName));
-                    nativeParameters.Add(argumentName);
-                }
-            }
-            
-            return new MethodParameters(managedParameters, nativeParameters, beforeCall, afterCall, fixedBlocks);
-        }
-
-        void GenerateOverload(IReadOnlyList<FunctionArgument> arguments, MethodParameters parameters)
-        {
-            foreach (var argument in arguments)
-            {
-                var argumentName = argument.Name;
-                if (TypeInfo.CSharpIdentifiers.TryGetValue(argumentName, out var csharpIdentifier))
-                    argumentName = csharpIdentifier;
-                
-                var argumentTypeDesc = argument.Type!.Description;
-                var argumentType = GetCSharpType(argumentTypeDesc);
-                
-                var defaultValue = TypeInfo.DefaultValues!.GetValueOrDefault(argument.DefaultValue, argument.DefaultValue)!;
-
-                if (defaultValue == "false")
-                    defaultValue = "0";
-                else if (defaultValue == "true")
-                    defaultValue = "1";
-                
-                if (argumentTypeDesc.Kind == "Pointer" && defaultValue != "null")
-                {
-                    // String
-                    if (argumentTypeDesc.InnerType!.BuiltinType == "char")
-                    {
-                        parameters.NativeParameters.Add(argumentName);
-                        var stringValue = defaultValue;
-                        parameters.BeforeCall.Add(() =>
-                        {
-                            writer.WriteLine($"{argumentType} {argumentName};");
-                            writer.WriteLine($"var {argumentName}_byteCount = Encoding.UTF8.GetByteCount({stringValue});");
-                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
-                            writer.WriteLine($"\t{argumentName} = Util.Allocate({argumentName}_byteCount + 1);");
-                            writer.WriteLine("else");
-                            writer.PushBlock();
-                            writer.WriteLine($"var {argumentName}_stackBytes = stackalloc byte[{argumentName}_byteCount + 1];");
-                            writer.WriteLine($"{argumentName} = {argumentName}_stackBytes;");
-                            writer.PopBlock();
-                            writer.WriteLine($"var {argumentName}_offset = Util.GetUtf8({stringValue}, {argumentName}, {argumentName}_byteCount);");
-                            writer.WriteLine($"{argumentName}[{argumentName}_offset] = 0;");
-                        });
-                        parameters.AfterCall.Add(() =>
-                        {
-                            writer.WriteLine($"if ({argumentName}_byteCount > Util.StackAllocationSizeLimit)");
-                            writer.WriteLine($"\tUtil.Free({argumentName});");
-                        });
-                        continue;
-                    }
-                }
-                
-                if (argumentType == "IntPtr")
-                    defaultValue = "IntPtr.Zero";
-                else if (_enums.ContainsKey(argumentType))
-                    defaultValue = $"({argumentType}){defaultValue}";
-                
-                parameters.NativeParameters.Add(argumentName);
-                parameters.BeforeCall.Add(() =>
-                {
-                    writer.WriteLine($"{argumentType} {argumentName} = {defaultValue};");
-                });
-            }
-
-            WriteMethod(functionName, GetReturnType(), parameters);
-        }
-
-        void WriteMethod(string functionName, (string safeReturnType, string returnCode) methodReturn, MethodParameters parameters, string? functionCall = null)
-        {
-            writer.WriteCommentary(CleanupComments(function.Comments));
-            writer.WriteLine($"public{(isStatic ? " static" : "")} {methodReturn.safeReturnType} {functionName}({string.Join(", ", parameters.ManagedParameters.Select(p => p.type + " " + p.name))})");
-            writer.PushBlock();
-
-            foreach (var action in parameters.BeforeCall)
-            {
-                action();
-                writer.WriteLine();
-            }
-        
-            if (parameters.FixedBlocks.Count > 0)
-            {
-                foreach (var action in parameters.FixedBlocks)
-                    action();
-                writer.PushBlock();
-            }
-
-            functionCall ??= $"{_nativeClass}.{function.Name}";
-            
-            writer.WriteLine($"{(methodReturn.safeReturnType == "void" ? "" : $"var ret = ")}{functionCall}({string.Join(", ", parameters.NativeParameters)});");
-
-            foreach (var action in parameters.AfterCall)
-                action();
-        
-            if (methodReturn.safeReturnType != "void")
-                writer.WriteLine($"return {methodReturn.returnCode};");
-
-            if (parameters.FixedBlocks.Count > 0)
-                writer.PopBlock();
-        
-            writer.PopBlock();
-        }
-    }
-
-    private string GetCSharpType(TypeDescription typeDescription)
-    {
-        const string unknown = "unknown";
-        const string notFound = "notFounded_"; 
-        
-        switch (typeDescription.Kind)
-        {
-            case "Builtin":
-            {
-                var type = typeDescription.BuiltinType!;
-                return TypeInfo.ConversionTypes.GetValueOrDefault(type, type);
-            }
-            case "User":
-            {
-                var type = typeDescription.Name!;
-
-                // try to find the conversion, or fallback to whats actually declared
-                if (TypeInfo.ConversionTypes.TryGetValue(type, out var  conversionType))
-                    return conversionType;
-                if (_pointerStructs.Contains(type))
-                    return "IntPtr";
-                
-                return _foundedTypes.GetValueOrDefault(type, type);
-            }
-            case "Pointer":
-            {
-                var innerType = typeDescription.InnerType!;
-                var innerTypeDef = GetCSharpType(innerType);
-
-                return innerTypeDef == "IntPtr" ? "IntPtr" : $"{innerTypeDef}*";
-            }
-            case "Type":
-            {
-                var innerType = typeDescription.InnerType!;
-
-                var name = typeDescription.Name;
-
-                if (innerType.Kind == "Pointer" && innerType.InnerType!.Kind == "Function")
-                {
-                    return $"{name}Delegate";
-                    // var delegateName = name + "Delegate";
-                    // // _csharpContext.AddDelegate(new CSharpDelegate(delegateName, GetCSharpType(innerType.InnerType!)));
-                    // return _csharpContext.GetType(delegateName);
-                }
-
-                return $"{unknown}_{name}";
-            }
-        }
-
-        return unknown;
-    }
-    
-    private bool GetWrappedType(string nativeType, out string wrappedType)
-    {
-        if (nativeType.StartsWith("Im") && nativeType.EndsWith("*") && !nativeType.StartsWith("ImVector") && !_enums.ContainsKey(nativeType[..^1]))
-        {
-            int pointerLevel = nativeType.Length - nativeType.IndexOf('*');
-            if (pointerLevel > 1)
-            {
-                wrappedType = null;
-                return false; // TODO
-            }
-            string nonPtrType = nativeType[..^pointerLevel];
-
-            if (TypeInfo.ConversionTypes.ContainsKey(nonPtrType))
-            {
-                wrappedType = null;
-                return false;
-            }
-
-            if (nonPtrType.EndsWith("Ptr"))
-            {
-                wrappedType = null;
-                return false;
-            }
-
-            wrappedType = nonPtrType + "Ptr";
-
-            return true;
-        }
-        else
-        {
-            wrappedType = null;
-            return false;
-        }
-    }
-    
-    private static bool IsStringFieldName(string name)
-    {
-        return Regex.IsMatch(name, ".*Filename.*")
-               || Regex.IsMatch(name, ".*Name");
-    }
-    
-    private bool EvalConditionals(List<ConditionalItem>? conditionals)
-    {
-        if (conditionals is {Count: > 0})
-        {
-            if (conditionals.Count == 1)
-            {
-                var condition = conditionals[0];
-                return (condition.Condition == "ifdef" && _knownDefines.ContainsKey(condition.Expression)) ||
-                       (condition.Condition == "ifndef" && !_knownDefines.ContainsKey(condition.Expression)) ||
-                       (condition.Condition == "if" && condition.Expression.StartsWith("defined") && !condition.Expression.StartsWith("&&") && 
-                        _knownDefines.ContainsKey(condition.Expression.Substring(8, condition.Expression.Length - 8 - 1)));
-            }
-            else
-            {
-                var condition = conditionals[1];
-                return (condition.Condition == "ifdef" && _knownDefines.ContainsKey(condition.Expression)) ||
-                       (condition.Condition == "ifndef" && !_knownDefines.ContainsKey(condition.Expression));
-            }
-        }
-        else
-        {
-            return true;
-        }
-    }
-
-    private Comments? CleanupComments(Comments? comment)
-    {
-        if (comment == null)
-            return null;
-
-        if (comment.Attached != null)
-        {
-            comment = comment with { Attached = Cleanup(comment.Attached) };
-        }
-
-        if (comment.Preceding != null)
-        {
-            comment = comment with
-            {
-                Preceding = comment.Preceding.Select(Cleanup).ToArray()
-            };
-        }
-        
-        return comment;
-
-        string Cleanup(string text)
-        {
-            if (text.StartsWith("// "))
-                return text[3..];
-            return text;
-        }
-    }
-    
-    private class MarshalledParameter
-    {
-        public MarshalledParameter(string marshalledType, bool isPinned, string varName, bool hasDefaultValue)
-        {
-            MarshalledType = marshalledType;
-            IsPinned = isPinned;
-            VarName = varName;
-            HasDefaultValue = hasDefaultValue;
-        }
-
-        public string MarshalledType { get; }
-        public bool IsPinned { get; }
-        public string VarName { get; }
-        public bool HasDefaultValue { get; }
-        public string PinTarget { get; internal set; }
     }
 }
