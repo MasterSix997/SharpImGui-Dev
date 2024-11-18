@@ -635,6 +635,11 @@ public class CSharpGenerator
                 if (argumentTypeDesc.Kind == "Array")
                 {
                     var paramType = _context.GetCSharpType(argumentTypeDesc.InnerType!);
+                    
+                    // Vector2, Vector3, Vector4
+                    if (paramType is "float" && int.Parse(argumentTypeDesc.Bounds!) is > 1 and <= 4)
+                        paramType = "Vector" + argumentTypeDesc.Bounds;
+                    
                     parameters.Add($"{paramType}* {argumentName}");
                 }
                 else if (argumentTypeDesc.Kind == "Type")

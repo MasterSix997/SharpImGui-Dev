@@ -161,6 +161,13 @@ internal static class MethodGenerator
         }
         else
         {
+            // Vector2, Vector3, Vector4
+            if (innerTypeDesc is { Kind: "Builtin", BuiltinType: "float" } && int.Parse(argumentTypeDesc.Bounds!) is > 1 and <= 4)
+            {
+                GenerateVectorX(argument, argumentTypeDesc, paramInfo);
+                return;
+            }
+            
             GenerateNativeArray(paramInfo, argumentName, paramType);
         }
         
@@ -212,6 +219,17 @@ internal static class MethodGenerator
             writer.WriteLine($"native_{argumentName}[i] = {argumentName}[i];");
             writer.PopBlock();
         });
+    }
+
+    private static void GenerateVectorX(FunctionArgument argument, TypeDescription argumentTypeDesc, MethodParameters paramInfo)
+    {
+        var vector = $"Vector{argumentTypeDesc.Bounds}";
+        argumentTypeDesc = argumentTypeDesc with
+        {
+            Kind = "Pointer", 
+            InnerType = new TypeDescription("Builtin", vector, vector, null, null, null, null, null)
+        };
+        HandlePointerArgument(argument, argumentTypeDesc, paramInfo);
     }
     
     private static void HandleDelegateArgument(FunctionArgument argument, MethodParameters paramInfo)

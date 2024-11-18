@@ -76,7 +76,8 @@ public record TypeDescription(
     TypeDescription? ReturnType,
     TypeDescription? InnerType,
     List<TypeDescription>? Parameters,
-    List<string>? StorageClasses
+    List<string>? StorageClasses,
+    string? Bounds
 );
 
 public record TypedefItem(
