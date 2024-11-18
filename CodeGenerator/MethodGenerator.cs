@@ -24,11 +24,22 @@ internal static class MethodGenerator
     private record ArgumentData(string Name, TypeDescription TypeDesc, MethodParameters ParamInfo);
     
     public static Context Context;
+
+    private static HashSet<string> _generatedSignatures = [];
     
     private static FunctionItem function;
     private static CSharpCodeWriter writer;
     private static bool isStatic = false;
     private static string functionName;
+
+    public static void Begin()
+    {
+        _generatedSignatures.Clear();
+        function = null;
+        writer = null;
+        isStatic = false;
+        functionName = null;
+    }
     
     public static void WriteMethodOverload(FunctionItem functionItem, CSharpCodeWriter codeWriter, bool isStatic = false)
     {
@@ -37,9 +48,9 @@ internal static class MethodGenerator
         MethodGenerator.isStatic = isStatic;
         
         functionName = function.Name.Split('_')[^1];
-        
+
         if (functionName.EndsWith("Ex"))
-            return;
+            functionName = functionName[..^2];
         
         WriteMethod(GetReturnType(), GetParameters());
     }
@@ -328,7 +339,9 @@ internal static class MethodGenerator
         var argumentName = argument.Name;
         var argumentType = Context.GetCSharpType(fixedTypeDesc);
             
-        paramInfo.ManagedParameters.Add(($"ref {argumentType}", argumentName));
+        var modifierType = argumentName.StartsWith("out_") ? "out" : "ref";
+        
+        paramInfo.ManagedParameters.Add(($"{modifierType} {argumentType}", argumentName));
             
         paramInfo.NativeParameters.Add($"native_{argumentName}");
         paramInfo.FixedBlocks.Add(() =>
@@ -424,8 +437,12 @@ internal static class MethodGenerator
 
     private static void WriteMethod((string safeReturnType, string returnCode) methodReturn, MethodParameters parameters, string? functionCall = null)
     {
+        var overloadSignature = $"{functionName}({string.Join(", ", parameters.ManagedParameters.Select(p => p.type + " " + p.name))})";
+        if (!_generatedSignatures.Add(overloadSignature))
+            return;
+
         writer.WriteCommentary(Context.CleanupComments(function.Comments));
-        writer.WriteLine($"public{(isStatic ? " static" : "")} {methodReturn.safeReturnType} {functionName}({string.Join(", ", parameters.ManagedParameters.Select(p => p.type + " " + p.name))})");
+        writer.WriteLine($"public{(isStatic ? " static" : "")} {methodReturn.safeReturnType} {overloadSignature}");
         writer.PushBlock();
 
         foreach (var action in parameters.BeforeCall)
@@ -456,4 +473,25 @@ internal static class MethodGenerator
         
         writer.PopBlock();
     }
+
+    // public static void CleanupFunctionOverloads(List<FunctionItem> functions)
+    // {
+    //     for (int i = functions.Count - 1; i >= 0; i--)
+    //     {
+    //         if (!functions[i].Name.StartsWith("Ex"))
+    //             continue;
+    //
+    //         var originalName = functions[i].Name[..^2];
+    //         var originalFunction = functions.First(f => f.Name == originalName);
+    //         
+    //         
+    //         for (var j = 0; j < originalFunction.Arguments.Count; j++)
+    //         {
+    //             if (originalFunction.Arguments[j].DefaultValue is null)
+    //                 continue;
+    //             
+    //             var
+    //         }
+    //     }
+    // }
 }

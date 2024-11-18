@@ -126,6 +126,8 @@ public static class TypeInfo
         { "ImPlotRect()", "new ImPlotRect()" },
         { "ImPlotCond_Once", "ImPlotCond.Once" },
         { "ImPlotRange()", "new ImPlotRange()" },
+        //Color To uint
+        { "IM_COL32_WHITE" , "0xFFFFFFFF" }
     };
 
     public static readonly Dictionary<string, string> CSharpIdentifiers = new()

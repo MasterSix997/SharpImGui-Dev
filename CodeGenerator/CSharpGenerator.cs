@@ -556,7 +556,8 @@ public class CSharpGenerator
                     }
                 }
             }
-
+            
+            MethodGenerator.Begin();
             foreach (var function in definitions.Functions)
             {
                 var nameSplit = function.Name.Split('_');
@@ -575,6 +576,7 @@ public class CSharpGenerator
                     continue;
                 
                 writer.WriteLine();
+                
                 MethodGenerator.WriteMethodOverload(function, writer);
             }
             
@@ -742,6 +744,7 @@ public class CSharpGenerator
         writer.WriteLine($"public static unsafe partial class {_context.MainMethodsClass}");
         writer.PushBlock();
 
+        MethodGenerator.Begin();
         foreach (var function in functions.Where(f => f.Name.StartsWith("ImGui_")))
         {
             if (!_context.EvalConditionals(function.Conditionals))
@@ -751,7 +754,7 @@ public class CSharpGenerator
                 continue;
 
             writer.WriteLine();
-                
+            
             MethodGenerator.WriteMethodOverload(function, writer, true);
         }
         
