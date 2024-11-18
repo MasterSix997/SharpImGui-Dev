@@ -14,18 +14,14 @@ internal static class MethodGenerator
         List<Action> FixedBlocks)
     {
         public MethodParameters Copy() => new(
-            [..ManagedParameters],
-            [..NativeParameters],
-            [..BeforeCall],
-            [..AfterCall],
-            [..FixedBlocks]);
+            [..ManagedParameters], [..NativeParameters], [..BeforeCall], 
+            [..AfterCall], [..FixedBlocks]);
     }
-    
-    private record ArgumentData(string Name, TypeDescription TypeDesc, MethodParameters ParamInfo);
     
     public static Context Context;
 
-    private static HashSet<string> _generatedSignatures = [];
+    private static readonly HashSet<string> _generatedSignatures = [];
+    private static readonly Dictionary<string, Comments?> _comments = new();
     
     private static FunctionItem function;
     private static CSharpCodeWriter writer;
@@ -35,6 +31,7 @@ internal static class MethodGenerator
     public static void Begin()
     {
         _generatedSignatures.Clear();
+        _comments.Clear();
         function = null;
         writer = null;
         isStatic = false;
@@ -50,7 +47,15 @@ internal static class MethodGenerator
         functionName = function.Name.Split('_')[^1];
 
         if (functionName.EndsWith("Ex"))
+        {
             functionName = functionName[..^2];
+            if (_comments.TryGetValue(functionName, out var comments))
+                function = functionItem with { Comments = comments };
+        }
+        else
+        {
+            _comments[functionName] = function.Comments;
+        }
         
         WriteMethod(GetReturnType(), GetParameters());
     }
@@ -491,25 +496,4 @@ internal static class MethodGenerator
         
         writer.PopBlock();
     }
-
-    // public static void CleanupFunctionOverloads(List<FunctionItem> functions)
-    // {
-    //     for (int i = functions.Count - 1; i >= 0; i--)
-    //     {
-    //         if (!functions[i].Name.StartsWith("Ex"))
-    //             continue;
-    //
-    //         var originalName = functions[i].Name[..^2];
-    //         var originalFunction = functions.First(f => f.Name == originalName);
-    //         
-    //         
-    //         for (var j = 0; j < originalFunction.Arguments.Count; j++)
-    //         {
-    //             if (originalFunction.Arguments[j].DefaultValue is null)
-    //                 continue;
-    //             
-    //             var
-    //         }
-    //     }
-    // }
 }
