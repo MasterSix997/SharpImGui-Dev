@@ -1,13 +1,18 @@
 # syntax=docker/dockerfile:1
 
+# Setup Arguments
+ARG IMGUI_VERSION="docking"
+
 # Setup Sources
 FROM alpine AS sources
 WORKDIR /dear_bindings
+ARG IMGUI_VERSION
 RUN apk update
 RUN apk add git openssh-client
 RUN git clone https://github.com/dearimgui/dear_bindings.git .
 RUN git config --global http.postBuffer 524288000
-RUN git clone --depth 1 https://github.com/ocornut/imgui.git imgui
+RUN git clone --branch ${IMGUI_VERSION} --depth 1 https://github.com/ocornut/imgui.git imgui
+RUN echo ls
 
 # Run Python Code Generator
 FROM python AS generator

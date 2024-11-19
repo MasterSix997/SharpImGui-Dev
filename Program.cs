@@ -1,4 +1,5 @@
 ﻿
+using System.IO;
 using SharpImGui_Dev.CodeGenerator;
 
 namespace SharpImGui_Dev
@@ -7,8 +8,13 @@ namespace SharpImGui_Dev
     {
         static void Main(string[] args)
         {
-            var generator = new CSharpGenerator();
+            var generator = new Generator();
             generator.Generate();
         }
+
+        // private static void CopyLibsToOutput()
+        // {
+        //     string outputDir = Path.Combine("../../../../", "SharpImGui")
+        // }
     }
 }

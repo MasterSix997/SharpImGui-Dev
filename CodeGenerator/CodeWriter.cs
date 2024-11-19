@@ -5,14 +5,14 @@ using System.Linq;
 
 namespace SharpImGui_Dev.CodeGenerator
 {
-    internal class CSharpCodeWriter : IDisposable
+    internal class CodeWriter : IDisposable
     {
         private readonly StreamWriter _writer;
         
         private int _currentIndentLevel;
         private string _currentIndent = "";
 
-        public CSharpCodeWriter(string outputPath, string fileName)
+        public CodeWriter(string outputPath, string fileName)
         {
             if (!Directory.Exists(outputPath))
                 Directory.CreateDirectory(outputPath);

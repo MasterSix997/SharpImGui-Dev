@@ -76,13 +76,13 @@ internal class Context
     
     public bool GetWrappedType(string nativeType, out string wrappedType)
     {
-        if (nativeType.StartsWith("Im") && nativeType.EndsWith("*") && !nativeType.StartsWith("ImVector") && !Enums.ContainsKey(nativeType[..^1]))
+        if (nativeType.StartsWith("Im") && nativeType.EndsWith('*') && !nativeType.StartsWith("ImVector") && !Enums.ContainsKey(nativeType[..^1]))
         {
             int pointerLevel = nativeType.Length - nativeType.IndexOf('*');
             if (pointerLevel > 1)
             {
                 wrappedType = null;
-                return false; // TODO
+                return false;
             }
             string nonPtrType = nativeType[..^pointerLevel];
 

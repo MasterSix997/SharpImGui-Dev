@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace SharpImGui_Dev.CodeGenerator;
@@ -24,7 +25,7 @@ internal static class MethodGenerator
     private static readonly Dictionary<string, Comments?> _comments = new();
     
     private static FunctionItem function;
-    private static CSharpCodeWriter writer;
+    private static CodeWriter writer;
     private static bool isStatic = false;
     private static string functionName;
 
@@ -38,7 +39,7 @@ internal static class MethodGenerator
         functionName = null;
     }
     
-    public static void WriteMethodOverload(FunctionItem functionItem, CSharpCodeWriter codeWriter, bool isStatic = false)
+    public static void WriteMethodOverload(FunctionItem functionItem, CodeWriter codeWriter, bool isStatic = false)
     {
         function = functionItem;
         writer = codeWriter;
@@ -160,9 +161,7 @@ internal static class MethodGenerator
                 GenerateStringArray(paramInfo, argumentName);
             }
             else
-            {
-                throw new NotImplementedException();
-            }
+                throw new InvalidDataException($"Unsupported array of pointers: {innerTypeDesc.Name}");
         }
         else
         {

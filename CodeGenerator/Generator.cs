@@ -9,14 +9,14 @@ using System.Text.RegularExpressions;
 
 namespace SharpImGui_Dev.CodeGenerator;
 
-public class CSharpGenerator
+public class Generator
 {
     private static readonly string ProjectPath = Path.Combine("../../../");
     private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
     
     private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
 
-    private Context? _context;
+    private Context _context = null!;
 
     public void Generate()
     {
@@ -68,14 +68,14 @@ public class CSharpGenerator
         {
             if (typedef.Type.Description.Kind == "Type")
             {
-                var innerType = typedef.Type.Description.InnerType;
-                var name = typedef.Type.Description.Name;
+                var innerType = typedef.Type.Description.InnerType!;
+                var name = typedef.Type.Description.Name!;
 
                 if (innerType.Kind == "Pointer" && innerType.InnerType!.Kind == "Function")
                 {
                     innerType = innerType.InnerType;
                     
-                    var @delegate = GenerateDelegateFromDescription(innerType, name!);
+                    var @delegate = GenerateDelegateFromDescription(innerType, name);
                     var comment = _context.CleanupComments(typedef.Comments);
                     _context.Delegates.Add((@delegate, comment));
                     continue;
@@ -92,7 +92,7 @@ public class CSharpGenerator
 
     private void GenerateConstants(IReadOnlyList<DefineItem> defines)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, "Constants.gen.cs");
+        using var writer = new CodeWriter(_outputPath, "Constants.gen.cs");
 
         writer.Using("System");
         writer.WriteLine();
@@ -184,7 +184,7 @@ public class CSharpGenerator
     
     private void GenerateEnums(IReadOnlyList<EnumItem> enums)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, "Enums.gen.cs");
+        using var writer = new CodeWriter(_outputPath, "Enums.gen.cs");
 
         writer.Using("System");
         writer.WriteLine();
@@ -313,7 +313,7 @@ public class CSharpGenerator
             if (structName.Contains('_'))
                 structName = structName.Split('_')[^1];
             
-            using var writer = new CSharpCodeWriter(structPath, $"{structName}.gen.cs");
+            using var writer = new CodeWriter(structPath, $"{structName}.gen.cs");
 
             writer.Using("System");
             writer.Using("System.Numerics");
@@ -449,10 +449,6 @@ public class CSharpGenerator
                 var fieldType = _context.GetCSharpType(field.Type.Description);
 
                 writer.WriteCommentary(_context.CleanupComments(field.Comments));
-                if (structName == "ImDrawData" && field.Name == "CmdLists")
-                {
-                        
-                }
 
                 if (field.IsArray)
                 {
@@ -502,7 +498,6 @@ public class CSharpGenerator
                             }
                         }
                     }
-
                     
                     string addressType = TypeInfo.FixedTypes.Contains(fieldType) ? $"NativePtr->{field.Name}" : $"&NativePtr->{field.Name}_{0}";
                     if (fieldType.EndsWith('*'))
@@ -519,6 +514,8 @@ public class CSharpGenerator
                     {
                         elementType = conversionType;
                     }
+                    else if(_context.PointerStructs.Contains(elementType))
+                        elementType = "IntPtr";
 
                     if (_context.GetWrappedType($"{elementType}*", out var wrappedType))
                     {
@@ -552,6 +549,8 @@ public class CSharpGenerator
                     }
                     else
                     {
+                        if (fieldType == "byte")
+                            fieldType = "bool";
                         writer.WriteLine($"public ref {fieldType} {field.Name} => ref Unsafe.AsRef<{fieldType}>(&NativePtr->{field.Name});");
                     }
                 }
@@ -596,7 +595,7 @@ public class CSharpGenerator
 
     private void GenerateMethods(IReadOnlyList<FunctionItem> functions)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, $"{_context.NativeClass}.gen.cs");
+        using var writer = new CodeWriter(_outputPath, $"{_context.NativeClass}.gen.cs");
 
         writer.Using("System");
         writer.Using("System.Numerics");
@@ -688,9 +687,10 @@ public class CSharpGenerator
     
     private void GenerateDelegates()
     {
-        using var writer = new CSharpCodeWriter(_outputPath, "Delegates.gen.cs");
+        using var writer = new CodeWriter(_outputPath, "Delegates.gen.cs");
         
         writer.Using("System");
+        writer.Using("System.Numerics");
         writer.Using("System.Runtime.InteropServices");
         writer.WriteLine();
         writer.StartNamespace(_context.Namespace);
@@ -737,7 +737,7 @@ public class CSharpGenerator
 
     private void GenerateMainOverloads(IReadOnlyList<FunctionItem> functions)
     {
-        using var writer = new CSharpCodeWriter(_outputPath, $"{_context.MainMethodsClass}.gen.cs");
+        using var writer = new CodeWriter(_outputPath, $"{_context.MainMethodsClass}.gen.cs");
 
         writer.Using("System");
         writer.Using("System.Numerics");

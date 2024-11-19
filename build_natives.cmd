@@ -10,7 +10,7 @@ echo running from %scriptPath%
 set dcimguiPath=%scriptPath%dcimgui
 
 :: Build docker image for building natives
-docker build -f dear_bindings.Dockerfile -t dear_bindings:v1 .
+docker build --build-arg IMGUI_VERSION="docking" -f dear_bindings.Dockerfile -t dear_bindings:v1 .
 
 echo --- BUILT ---
 
