@@ -13,13 +13,17 @@ internal class Context
     public readonly HashSet<string> PointerStructs = [];
     public readonly Dictionary<string, List<(string name, string value)>> Enums = new();
     public readonly Dictionary<string, string> FoundedTypes = new();
-    public readonly Dictionary<string, int> ArraySizes = new();
+    public readonly Dictionary<string, int> ArraySizes = new()
+    {
+        ["ImGuiKey_KeysData_SIZE"] = 154,
+    };
     public readonly Dictionary<string, (string? type, string value)> KnownDefines = new()
     {
         ["IMGUI_DISABLE_OBSOLETE_FUNCTIONS"] = (null, ""),
         ["IMGUI_DISABLE_OBSOLETE_KEYIO"] = (null, "")
     };
 
+    public readonly HashSet<string> DelegateNames = [];
     public readonly List<(string content, Comments? comments)> Delegates = [];
     
     public string GetCSharpType(TypeDescription typeDescription)

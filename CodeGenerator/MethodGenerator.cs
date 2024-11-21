@@ -140,8 +140,24 @@ internal static class MethodGenerator
             {
                 argumentType = wrappedType;
             }
+            else if (argumentType == "ushort*")
+            {
+                paramInfo.ManagedParameters.Add(("IntPtr", argumentName));
+                paramInfo.NativeParameters.Add($"native_{argumentName}");
+                paramInfo.BeforeCall.Add(() =>
+                {
+                    writer.WriteLine($"// Marshaling '{argumentName}' to native ushort pointer");
+                    writer.WriteLine($"ushort* native_{argumentName} = (ushort*){argumentName}.ToPointer();");
+                });
+                return;
+            }
+            else
+            {
+                GenerateFixedPointer(argument, argumentTypeDesc.InnerType!, paramInfo);
+                return;
+            }
         }
-                    
+        
         paramInfo.ManagedParameters.Add((argumentType, argumentName));
         paramInfo.NativeParameters.Add(argumentName);
     }
@@ -251,7 +267,6 @@ internal static class MethodGenerator
 
         if (innerTypeDesc.Kind == "Pointer")
         {
-            
         }
         else if (innerTypeDesc.Kind != "Builtin")
         {
@@ -271,9 +286,15 @@ internal static class MethodGenerator
                 if (innerTypeDesc.StorageClasses is not null && innerTypeDesc.StorageClasses.Contains("const"))
                     GenerateStringPointer(paramInfo, argumentName);
                 else
-                    GenerateStringBuffer(paramInfo, argumentName);
+                    GenerateStaticBuffer(paramInfo, argumentName, "byte");
                 return;
             default:
+                if (innerTypeDesc.StorageClasses is not null && innerTypeDesc.StorageClasses.Contains("const"))
+                {
+                    var typeName = Context.GetCSharpType(innerTypeDesc);
+                    GenerateStaticBuffer(paramInfo, argumentName, typeName);
+                    return;
+                }
                 GenerateFixedPointer(argument, innerTypeDesc, paramInfo);
                 return;
         }
@@ -346,13 +367,23 @@ internal static class MethodGenerator
         });
     }
 
-    private static void GenerateStringBuffer(MethodParameters paramInfo, string argumentName)
+    // private static void GenerateStringBuffer(MethodParameters paramInfo, string argumentName)
+    // {
+    //     paramInfo.ManagedParameters.Add(("byte[]", argumentName));
+    //     paramInfo.NativeParameters.Add($"native_{argumentName}");
+    //     paramInfo.FixedBlocks.Add(() =>
+    //     {
+    //         writer.WriteLine($"fixed (byte* native_{argumentName} = {argumentName})");
+    //     });
+    // }
+
+    private static void GenerateStaticBuffer(MethodParameters paramInfo, string argumentName, string paramType)
     {
-        paramInfo.ManagedParameters.Add(("byte[]", argumentName));
+        paramInfo.ManagedParameters.Add(($"{paramType}[]", argumentName));
         paramInfo.NativeParameters.Add($"native_{argumentName}");
         paramInfo.FixedBlocks.Add(() =>
         {
-            writer.WriteLine($"fixed (byte* native_{argumentName} = {argumentName})");
+            writer.WriteLine($"fixed ({paramType}* native_{argumentName} = {argumentName})");
         });
     }
     
@@ -444,13 +475,24 @@ internal static class MethodGenerator
         var isWrappedType = Context.GetWrappedType(csharpReturnType, out var safeReturnType);
         if (!isWrappedType)
             safeReturnType = csharpReturnType;
+        
+        var returnTypeDesc = function.ReturnType!.Description;
 
         if (csharpReturnType != "void")
         {
-            if (function.ReturnType!.Description.BuiltinType == "bool")
+            if (returnTypeDesc.BuiltinType == "bool")
             {
                 returnCode = $"ret != 0";
                 safeReturnType = "bool";
+            }
+            else if (returnTypeDesc.Kind == "Pointer")
+            {
+                var innerTypeDesc = returnTypeDesc.InnerType!;
+                if (innerTypeDesc.BuiltinType == "char")
+                {
+                    returnCode = "Util.StringFromPtr(ret)";
+                    safeReturnType = "string";
+                }
             }
         }
 

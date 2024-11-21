@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SharpImGui-Dev", "SharpImGui-Dev.csproj", "{1C41683C-AB63-430E-8847-D73390AED9CF}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SharpImGui", "SharpImGui\SharpImGui.csproj", "{748FE568-249D-4C19-BDE2-51044E9F93FE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{1C41683C-AB63-430E-8847-D73390AED9CF}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C41683C-AB63-430E-8847-D73390AED9CF}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C41683C-AB63-430E-8847-D73390AED9CF}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C41683C-AB63-430E-8847-D73390AED9CF}.Release|Any CPU.Build.0 = Release|Any CPU
+		{748FE568-249D-4C19-BDE2-51044E9F93FE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{748FE568-249D-4C19-BDE2-51044E9F93FE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{748FE568-249D-4C19-BDE2-51044E9F93FE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{748FE568-249D-4C19-BDE2-51044E9F93FE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

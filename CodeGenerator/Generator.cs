@@ -1,4 +1,7 @@
-﻿using System;
+﻿//TODO: Return string instead of byte*
+//Library Unsafe (System.Runtime.CompilerServices.Unsafe)
+//Add support to generate Unity VectorT instead of System.Numerics.VectorT
+using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Globalization;
@@ -15,8 +18,11 @@ public class Generator
     private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
     
     private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
+    // private string _outputPath = Path.Combine("C:/Users/zanog/OneDrive/Documentos/!Unity/Packages/UBImGui/Packages/UBImGui/Runtime/SharpImGui/Generated");
 
     private Context _context = null!;
+    private string _vectorProvider = "System.Numerics";
+    // private string _vectorProvider = "UnityEngine";
 
     public void Generate()
     {
@@ -78,6 +84,7 @@ public class Generator
                     var @delegate = GenerateDelegateFromDescription(innerType, name);
                     var comment = _context.CleanupComments(typedef.Comments);
                     _context.Delegates.Add((@delegate, comment));
+                    _context.DelegateNames.Add(name);
                     continue;
                 }
             }
@@ -316,8 +323,9 @@ public class Generator
             using var writer = new CodeWriter(structPath, $"{structName}.gen.cs");
 
             writer.Using("System");
-            writer.Using("System.Numerics");
+            writer.Using(_vectorProvider);
             writer.Using("System.Runtime.CompilerServices");
+            writer.Using("System.Runtime.InteropServices");
             writer.Using("System.Text");
             writer.WriteLine();
             writer.StartNamespace(_context.Namespace);
@@ -337,7 +345,6 @@ public class Generator
                     continue;
                 
                 var fieldType = _context.GetCSharpType(field.Type.Description);
-
                 
                 writer.WriteCommentary(_context.CleanupComments(field.Comments));
                 var nativeType = field.Type.Description;
@@ -403,13 +410,14 @@ public class Generator
 
                         var cSharpDelegate = GenerateDelegateFromDescription(innerType, name + "Delegate");
                         _context.Delegates.Add((cSharpDelegate, null));
+                        _context.DelegateNames.Add(name + "Delegate");
                     }
                     else
                     {
                         Console.WriteLine($"Unknown Type field {field.Name} of {structName}");
                     }
                     
-                    writer.WriteLine($"public {fieldType} {field.Name};");
+                    writer.WriteLine($"public IntPtr {field.Name};");
                 }
                 else
                 {
@@ -417,6 +425,9 @@ public class Generator
                     {
                         fieldType = "ImVector";
                     }
+
+                    if (_context.DelegateNames.Contains(fieldType))
+                        fieldType = "IntPtr";
                     
                     writer.WriteLine($"public {fieldType} {field.Name};");
                 }
@@ -505,6 +516,22 @@ public class Generator
                         fieldType = fieldType[..^1];
                     }
                     writer.WriteLine($"public RangeAccessor<{fieldType}> {field.Name} => new RangeAccessor<{fieldType}>({addressType}, {arraySize});");
+                }
+                else if (field.Type.Description.Kind == "Type")
+                {
+                    var innerType = field.Type.Description.InnerType!;
+                    var name = field.Type.Description.Name + "Delegate";
+
+                    if (innerType.Kind != "Pointer" || innerType.InnerType!.Kind != "Function")
+                    {
+                        Console.WriteLine($"Unknown Type field {field.Name} of {structName}");
+                    }
+                    
+                    writer.WriteLine($"public {name} {field.Name}");
+                    writer.PushBlock();
+                    writer.WriteLine($"get => ({name})Marshal.GetDelegateForFunctionPointer(NativePtr->{field.Name}, typeof({name}));");
+                    writer.WriteLine($"set => NativePtr->{field.Name} = Marshal.GetFunctionPointerForDelegate(value);");
+                    writer.PopBlock();
                 }
                 else if (fieldType.Contains("ImVector"))
                 {
@@ -598,7 +625,7 @@ public class Generator
         using var writer = new CodeWriter(_outputPath, $"{_context.NativeClass}.gen.cs");
 
         writer.Using("System");
-        writer.Using("System.Numerics");
+        writer.Using(_vectorProvider);
         writer.Using("System.Runtime.InteropServices");
         writer.StartNamespace(_context.Namespace);
         writer.WriteLine($"public static unsafe partial class {_context.NativeClass}");
@@ -656,6 +683,7 @@ public class Generator
                         var csharpDelegate = GenerateDelegateFromDescription(innerType, delegateName);
                         
                         _context.Delegates.Add((csharpDelegate, null));
+                        _context.DelegateNames.Add(delegateName);
 
                         parameters.Add($"{delegateName} {argumentName}");
                     }
@@ -690,7 +718,7 @@ public class Generator
         using var writer = new CodeWriter(_outputPath, "Delegates.gen.cs");
         
         writer.Using("System");
-        writer.Using("System.Numerics");
+        writer.Using(_vectorProvider);
         writer.Using("System.Runtime.InteropServices");
         writer.WriteLine();
         writer.StartNamespace(_context.Namespace);
@@ -724,11 +752,21 @@ public class Generator
             }
             else
             {
-                Console.WriteLine($"Function parameter {parameter.Name} was not of kind Type. Was {parameter.Kind}");
+                Console.WriteLine($"Function parameter '{parameter.Name}' was not of kind Type. Was '{parameter.Kind}'");
             }
 
             var csharpType = _context.GetCSharpType(argumentType!);
-        
+            if (csharpType == "..." || argumentName == "...")
+                continue;
+            
+            if (csharpType.Contains('*') && !csharpType.Contains("ImVector"))
+            {
+                if (_context.GetWrappedType(csharpType, out var wrappedType))
+                    csharpType = wrappedType;
+                else if (csharpType == "void*")
+                    csharpType = "IntPtr";
+            }
+
             parameters.Add($"{csharpType} {argumentName}");
         }
 
@@ -740,7 +778,7 @@ public class Generator
         using var writer = new CodeWriter(_outputPath, $"{_context.MainMethodsClass}.gen.cs");
 
         writer.Using("System");
-        writer.Using("System.Numerics");
+        writer.Using(_vectorProvider);
         writer.Using("System.Runtime.InteropServices");
         writer.Using("System.Text");
         writer.WriteLine("// ReSharper disable InconsistentNaming");

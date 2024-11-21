@@ -8,6 +8,6 @@ build_property.PlatformNeutralAssembly =
 build_property.EnforceExtendedAnalyzerRules = 
 build_property._SupportedPlatformList = Linux,macOS,Windows
 build_property.RootNamespace = SharpImGui_Dev
-build_property.ProjectDir = C:\Users\zanog\OneDrive\Documentos\C# Projects\SharpImGui\SharpImGui-Dev\
+build_property.ProjectDir = C:\Users\zanog\OneDrive\Documentos\C# Projects\SharpImGui-Dev\
 build_property.EnableComHosting = 
 build_property.EnableGeneratedComInterfaceComImportInterop = 

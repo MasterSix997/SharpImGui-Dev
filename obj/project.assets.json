@@ -13,11 +13,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\zanog\\OneDrive\\Documentos\\C# Projects\\SharpImGui\\SharpImGui-Dev\\SharpImGui-Dev.csproj",
+      "projectUniqueName": "C:\\Users\\zanog\\OneDrive\\Documentos\\C# Projects\\SharpImGui-Dev\\SharpImGui-Dev.csproj",
       "projectName": "SharpImGui-Dev",
-      "projectPath": "C:\\Users\\zanog\\OneDrive\\Documentos\\C# Projects\\SharpImGui\\SharpImGui-Dev\\SharpImGui-Dev.csproj",
+      "projectPath": "C:\\Users\\zanog\\OneDrive\\Documentos\\C# Projects\\SharpImGui-Dev\\SharpImGui-Dev.csproj",
       "packagesPath": "C:\\Users\\zanog\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\zanog\\OneDrive\\Documentos\\C# Projects\\SharpImGui\\SharpImGui-Dev\\obj\\",
+      "outputPath": "C:\\Users\\zanog\\OneDrive\\Documentos\\C# Projects\\SharpImGui-Dev\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\zanog\\AppData\\Roaming\\NuGet\\NuGet.Config",
