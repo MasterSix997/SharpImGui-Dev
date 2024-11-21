@@ -17,8 +17,7 @@ public class Generator
     private static readonly string ProjectPath = Path.Combine("../../../");
     private static readonly string DearBindingsPath = Path.Combine(ProjectPath, "dcimgui");
     
-    private string _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
-    // private string _outputPath = Path.Combine("C:/Users/zanog/OneDrive/Documentos/!Unity/Packages/UBImGui/Packages/UBImGui/Runtime/SharpImGui/Generated");
+    private string _outputPath = Path.Combine(ProjectPath, "SharpImGui/Generated");
 
     private Context _context = null!;
     private string _vectorProvider = "System.Numerics";
@@ -32,13 +31,13 @@ public class Generator
         _context = new Context();
         MethodGenerator.Context = _context;
         
-        _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated");
+        _outputPath = Path.Combine(ProjectPath, "SharpImGui/Generated");
         _context.Namespace = "SharpImGui";
         _context.MainMethodsClass = "ImGui";
         _context.NativeClass = "ImGuiNative";
         GenerateBindings("dcimgui.json");
         
-        _outputPath = Path.Combine(ProjectPath, "../SharpImGui/Generated/Internal");
+        _outputPath = Path.Combine(ProjectPath, "SharpImGui/Generated/Internal");
         _context.Namespace = "SharpImGui.Internal";
         _context.MainMethodsClass = "ImGuiInternal";
         _context.NativeClass = "ImGuiInternalNative";
