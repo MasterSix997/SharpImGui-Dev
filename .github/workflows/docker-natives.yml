@@ -15,11 +15,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Setup Directory
+      run: cd SharpImGui-Dev
     - name: Build the Docker image
-      run: docker build . --file dear_bindings.Dockerfile --tag dear_bindings:v1
+      run: |
+        docker build . --file dear_bindings.Dockerfile --tag dear_bindings:v1
     - name: Run Docker image
       run: |
-        docker run --rm -i -v "${GITHUB_WORKSPACE}/cimgui:/cimgui_build" dear_bindings:v1
+        docker run --rm -i -v "${GITHUB_WORKSPACE}/dcimgui:/dcimgui_build" dear_bindings:v1
     - name: Verify compilation
       run: |
         file ${{ github.workspace }}/dcimgui/dcimgui_x64.dll
