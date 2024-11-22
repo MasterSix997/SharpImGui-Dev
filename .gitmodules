@@ -1,0 +1,3 @@
+[submodule "SharpImGui"]
+	path = SharpImGui
+	url = https://github.com/MasterSix997/SharpImGui
