@@ -8,5 +8,6 @@ class Program
     {
         var generator = new Generator();
         generator.Generate();
+        FilesManager.CopyNativesToOutputDirectory();
     }
 }
