@@ -15,10 +15,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Setup Directory
-      run: cd SharpImGui-Dev
     - name: Build the Docker image
       run: |
+        cd SharpImGui-Dev/
         docker build . --file dear_bindings.Dockerfile --tag dear_bindings:v1
     - name: Run Docker image
       run: |
