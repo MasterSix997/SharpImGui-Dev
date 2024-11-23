@@ -26,9 +26,9 @@
     
     <ItemGroup>
         
-        <Content Include="$(MSBuildThisFileDirectory)/../Plugins/dcimgui/win-x64/dcimgui.dll" CopyToOutputDirectory="PreserveNewest" />
-        <Content Include="$(MSBuildThisFileDirectory)/../Plugins/dcimgui/osx/dcimgui.dylib" CopyToOutputDirectory="PreserveNewest" Link="lib%(Filename)%(Extension)" />
-        <Content Include="$(MSBuildThisFileDirectory)/../Plugins/dcimgui/linux/dcimgui.so" CopyToOutputDirectory="PreserveNewest" Link="lib%(Filename)%(Extension)" />
+        <Content Include="$(MSBuildThisFileDirectory)/../SharpImGui/Plugins/dcimgui/win-x64/dcimgui.dll" CopyToOutputDirectory="PreserveNewest" />
+        <Content Include="$(MSBuildThisFileDirectory)/../SharpImGui/Plugins/dcimgui/osx/dcimgui.dylib" CopyToOutputDirectory="PreserveNewest" Link="lib%(Filename)%(Extension)" />
+        <Content Include="$(MSBuildThisFileDirectory)/../SharpImGui/Plugins/dcimgui/linux/dcimgui.so" CopyToOutputDirectory="PreserveNewest" Link="lib%(Filename)%(Extension)" />
     </ItemGroup>
 
 </Project>
