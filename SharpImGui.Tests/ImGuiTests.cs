@@ -1,6 +1,6 @@
 namespace SharpImGui.Tests;
 
-public class Tests
+public class ImGuiTests
 {
     [SetUp]
     public void Setup()

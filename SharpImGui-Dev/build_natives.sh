@@ -10,7 +10,7 @@ echo "running from $scriptPath"
 dcimguiPath="$scriptPath/dcimgui"
 
 # Construir a imagem Docker
-docker build -f dear_bindings.Dockerfile -t dear_bindings:v1 .
+docker build --build-arg IMGUI_VERSION=v1.91.5-docking -f dear_bindings.Dockerfile -t dear_bindings:v1 .
 
 echo "--- BUILT ---"
 
